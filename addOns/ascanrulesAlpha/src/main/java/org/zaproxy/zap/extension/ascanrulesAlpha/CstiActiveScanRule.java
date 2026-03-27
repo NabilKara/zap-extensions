@@ -20,7 +20,7 @@ import org.zaproxy.addon.client.internal.ClientSideDetails;
 public class CstiActiveScanRule extends AbstractAppPlugin {
 
     private static final Logger LOGGER = LogManager.getLogger(CstiActiveScanRule.class);
-    private static final int PLUGIN_ID = 100001;
+    private static final int PLUGIN_ID = 553542;
     private static final String MESSAGE_PREFIX = "ascanalpha.csti.";
 
     private final Set<String> scannedUrls = ConcurrentHashMap.newKeySet();
@@ -67,7 +67,12 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         HttpMessage msg = getBaseMsg();
         String fullUrl = msg.getRequestHeader().getURI().toString();
 
-        if (!scannedUrls.add(fullUrl)) return;
+        boolean added = scannedUrls.add(fullUrl);
+        if (!added) {
+            LOGGER.debug("CSTI scan skipped (already scanned URL): {}", fullUrl);
+            return;
+        }
+        LOGGER.debug("CSTI scan proceeding (new URL): {}", fullUrl);
 
         ExtensionClientIntegration extClient =
                 Control.getSingleton()
@@ -76,7 +81,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
         if (extClient == null) {
             LOGGER.debug("Client add-on not available.");
-            raiseDebugAlert("Client add-on not available.", fullUrl);
+            raiseDebugAlert(msg, "Client add-on not available.", fullUrl);
             return;
         }
 
@@ -90,7 +95,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
         if (node == null) {
             LOGGER.debug("No client spider node for {} (tried full and bare URL).", fullUrl);
-            raiseDebugAlert("No client spider node found for URL.", fullUrl);
+            raiseDebugAlert(msg, "No client spider node found for URL.", fullUrl);
             return;
         }
 
@@ -99,7 +104,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
         if (findings.isEmpty()) {
             LOGGER.debug("Node found for {} but no usable components.", fullUrl);
-            raiseDebugAlert("Client node found, but no usable components.", fullUrl);
+            raiseDebugAlert(msg, "Client node found, but no usable components.", fullUrl);
             return;
         }
 
@@ -112,16 +117,18 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                 .setName(getName() + " [step-1 discovery]")
                 .setDescription("Client Spider data found for this URL.")
                 .setOtherInfo(String.join("\n", findings))
+                .setMessage(msg)
                 .raise();
     }
 
-    private void raiseDebugAlert(String reason, String fullUrl) {
+    private void raiseDebugAlert(HttpMessage msg, String reason, String fullUrl) {
         newAlert()
                 .setRisk(Alert.RISK_INFO)
                 .setConfidence(Alert.CONFIDENCE_HIGH)
                 .setName(getName() + " [debug]")
                 .setDescription(reason)
                 .setOtherInfo("URL: " + fullUrl)
+                .setMessage(msg)
                 .raise();
     }
 

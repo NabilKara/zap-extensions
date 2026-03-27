@@ -15,7 +15,6 @@ include("testutils")
 // Keep the add-ons in alphabetic order.
 var addOns =
     listOf(
-        "myaddon",
         "accessControl",
         "alertFilters",
         "allinonenotes",
