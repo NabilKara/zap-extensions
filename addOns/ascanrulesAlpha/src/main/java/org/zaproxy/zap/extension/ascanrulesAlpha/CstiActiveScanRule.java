@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+
+import lombok.Setter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.parosproxy.paros.Constant;
@@ -23,7 +25,12 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
     private static final int PLUGIN_ID = 553542;
     private static final String MESSAGE_PREFIX = "ascanalpha.csti.";
 
-    private final Set<String> scannedUrls = ConcurrentHashMap.newKeySet();
+    private static final Set<String> scannedUrls = ConcurrentHashMap.newKeySet();
+
+
+    @Setter
+    private ExtensionClientIntegration extensionClientIntegration;
+
 
     @Override
     public void init() {
@@ -74,10 +81,11 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         }
         LOGGER.debug("CSTI scan proceeding (new URL): {}", fullUrl);
 
-        ExtensionClientIntegration extClient =
-                Control.getSingleton()
-                        .getExtensionLoader()
-                        .getExtension(ExtensionClientIntegration.class);
+        ExtensionClientIntegration extClient = (extensionClientIntegration != null)
+                ? extensionClientIntegration
+                : Control.getSingleton()
+                  .getExtensionLoader()
+                  .getExtension(ExtensionClientIntegration.class);
 
         if (extClient == null) {
             LOGGER.debug("Client add-on not available.");
@@ -91,6 +99,10 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             if (!bareUrl.equals(fullUrl)) {
                 node = extClient.getClientNode(bareUrl, false, false);
             }
+        }
+        if (node == null && !fullUrl.endsWith("/")
+                && !fullUrl.contains("?") && !fullUrl.contains("#")) {
+            node = extClient.getClientNode(fullUrl + "/", false, false);
         }
 
         if (node == null) {
@@ -132,7 +144,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                 .raise();
     }
 
-    private String stripQueryAndFragment(String fullUrl) {
+     String stripQueryAndFragment(String fullUrl) {
         if (fullUrl == null) {
             return null;
         }
@@ -163,18 +175,46 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                 }
             }
         }
-
-        // the site root node's children contains the actual page nodes with components.
-        for (int i = 0; i < node.getChildCount(); i++) {
-            collectFindings(node.getChildAt(i), findings);
-        }
     }
+
 
     private static String describeComponent(ClientSideComponent component) {
         ClientSideComponent.Type type = component.getType();
+        String tag = component.getTagName();
 
-        if (type == ClientSideComponent.Type.REDIRECT || type == ClientSideComponent.Type.CONTENT_LOADED) {
+        if (type == ClientSideComponent.Type.REDIRECT
+                || type == ClientSideComponent.Type.CONTENT_LOADED
+                || type == ClientSideComponent.Type.DOM_MUTATION
+                || type == ClientSideComponent.Type.PAGE_LOAD
+                || type == ClientSideComponent.Type.PAGE_UNLOAD
+                || type == ClientSideComponent.Type.UNKNOWN) {
             return null;
+        }
+
+        if (type == ClientSideComponent.Type.NODE_ADDED) {
+            if (tag == null || tag.isBlank())  return null;
+
+            boolean isInjectable =
+                    tag.equalsIgnoreCase("input")
+                    || tag.equalsIgnoreCase("textarea")
+                    || tag.equalsIgnoreCase("a");
+
+            if(!isInjectable) return null;
+
+            if(tag.equalsIgnoreCase("a")) {
+                String href = component.getHref();
+                if (href == null || !href.contains("?")) return null;
+            }
+        }
+
+        // to check later
+        if(component.isStorageEvent()) {
+            return String.format(
+                    "type=%-14s  tag=%-10s  id=%-20s  [to check later]",
+                    type,
+                    nullToEmpty(tag),
+                    nullToEmpty(component.getId())
+            );
         }
 
         return String.format(
