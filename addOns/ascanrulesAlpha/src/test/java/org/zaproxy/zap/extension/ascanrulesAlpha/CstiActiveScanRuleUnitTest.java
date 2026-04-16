@@ -20,6 +20,7 @@
 package org.zaproxy.zap.extension.ascanrulesAlpha;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
@@ -110,6 +111,98 @@ class CstiActiveScanRuleUnitTest {
 		assertThat(result.detected(), is(equalTo(true)));
 		assertThat(result.engineName(), is(equalTo("vue")));
 		assertThat(result.globalExpression(), is(equalTo("Vue")));
+	}
+
+	@Test
+	void shouldCaptureFunctionCallHeuristicMatches() {
+		// Given
+		TestWebDriver driver = mock(TestWebDriver.class);
+		given(driver.executeScript(anyString()))
+				.willAnswer(
+						invocation -> {
+							String payload = invocation.getArgument(0, String.class);
+							if (payload.contains("document.querySelectorAll('script:not([src])')")) {
+								return "{\"script\":\"angular.module('app',[]).controller('C', function(){});\","
+										+ "\"html\":\"<html ng-app='app'></html>\"}";
+							}
+							return Boolean.FALSE;
+						});
+		given(driver.executeScript(anyString(), any()))
+				.willAnswer(
+						invocation -> {
+							String payload = invocation.getArgument(0, String.class);
+
+							if (payload.contains("String(arguments[0]).split('.')")) {
+								Object arg = invocation.getArgument(1);
+								String global = null;
+								if (arg instanceof Object[] varArgs && varArgs.length > 0) {
+									global = String.valueOf(varArgs[0]);
+								} else if (arg != null) {
+									global = String.valueOf(arg);
+								}
+								if ("angular.version".equals(global)) {
+									return Boolean.TRUE;
+								}
+								return Boolean.FALSE;
+							}
+
+							return Boolean.FALSE;
+						});
+
+		// When
+		DetectionResult result =
+				ClientSideEngineDetector.detect(driver, "http://example.test/heuristic");
+
+		// Then
+		assertThat(result.detected(), is(equalTo(true)));
+		assertThat(result.engineName(), is(equalTo("angular")));
+		assertThat(result.globalExpression(), is(equalTo("angular.version")));
+		assertThat(result.hasActiveCalls(), is(equalTo(true)));
+		assertThat(result.matchedCalls(), containsInAnyOrder(".controller("));
+	}
+
+	@Test
+	void shouldScoreLowWhenOnlyGlobalDetected() {
+		DetectionResult result = new DetectionResult("angular", "angular.version");
+
+		assertThat(
+				CstiActiveScanRule.scoreEngineDetectionConfidence(result),
+				is(equalTo(CstiActiveScanRule.EngineConfidence.LOW)));
+	}
+
+	@Test
+	void shouldScoreHighForGlobalAndActivityWhenTagHeuristicApplies() {
+		DetectionResult result =
+				new DetectionResult("angular", "angular.version", java.util.List.of(".controller("));
+
+		assertThat(
+				CstiActiveScanRule.scoreEngineDetectionConfidence(result),
+				is(equalTo(CstiActiveScanRule.EngineConfidence.HIGH)));
+	}
+
+	@Test
+	void shouldScoreVeryHighForGlobalAndTagEvidence() {
+		DetectionResult result =
+				new DetectionResult(
+						"angular",
+						"angular.version",
+						java.util.List.of(),
+						java.util.List.of(),
+						java.util.List.of("ng-app"));
+
+		assertThat(
+				CstiActiveScanRule.scoreEngineDetectionConfidence(result),
+				is(equalTo(CstiActiveScanRule.EngineConfidence.VERY_HIGH)));
+	}
+
+	@Test
+	void shouldScoreVeryHighForGlobalAndActivityWhenTagHeuristicIsNotApplicable() {
+		DetectionResult result =
+				new DetectionResult("regular", "Regular", java.util.List.of("new Regular("));
+
+		assertThat(
+				CstiActiveScanRule.scoreEngineDetectionConfidence(result),
+				is(equalTo(CstiActiveScanRule.EngineConfidence.VERY_HIGH)));
 	}
 
 	@Test

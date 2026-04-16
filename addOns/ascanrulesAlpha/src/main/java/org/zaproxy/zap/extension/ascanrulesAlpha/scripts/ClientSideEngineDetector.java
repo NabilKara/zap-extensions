@@ -1,18 +1,23 @@
 package org.zaproxy.zap.extension.ascanrulesAlpha.scripts;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.WebDriver;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 public class ClientSideEngineDetector {
 
     private static final Logger LOGGER = LogManager.getLogger(ClientSideEngineDetector.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     static final Map<String, String> TEMPLATES = new LinkedHashMap<>();
-
     static {
         TEMPLATES.put("angular",        "angular.version");
         TEMPLATES.put("vue",            "Vue");
@@ -49,8 +54,195 @@ public class ClientSideEngineDetector {
         TEMPLATES.put("alpine",         "Alpine");
     }
 
+    public enum SearchTarget { SCRIPT, HTML }
 
-    private static final String PAYLOAD =
+    public record FunctionSignature(String signature, SearchTarget target) {}
+
+    static final Map<String, List<FunctionSignature>> RENDER_FUNCTIONS = new LinkedHashMap<>();
+    static {
+        RENDER_FUNCTIONS.put("angular", List.of(
+                new FunctionSignature("$compile(",      SearchTarget.SCRIPT),
+                new FunctionSignature(".controller(",   SearchTarget.SCRIPT),
+                new FunctionSignature(".directive(",    SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("vue", List.of(
+                new FunctionSignature("new Vue(",        SearchTarget.SCRIPT),
+                new FunctionSignature("createApp(",      SearchTarget.SCRIPT),
+                new FunctionSignature("Vue.component(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("mavo", List.of(
+                new FunctionSignature("new Mavo(",     SearchTarget.SCRIPT),
+                new FunctionSignature("Mavo.render(", SearchTarget.SCRIPT)
+                // "mv-app" removed – now detected by H3b TEMPLATE_ATTR_PATTERNS
+        ));
+        RENDER_FUNCTIONS.put("handlebars", List.of(
+                new FunctionSignature("Handlebars.compile(",        SearchTarget.SCRIPT),
+                new FunctionSignature("Handlebars.template(",       SearchTarget.SCRIPT),
+                new FunctionSignature("Handlebars.registerHelper(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("mustache", List.of(
+                new FunctionSignature("Mustache.render(",  SearchTarget.SCRIPT),
+                new FunctionSignature("Mustache.to_html(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("hogan", List.of(
+                new FunctionSignature("Hogan.compile(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("twig", List.of(
+                new FunctionSignature("Twig.twig(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("dot", List.of(
+                new FunctionSignature("doT.template(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("ejs", List.of(
+                new FunctionSignature("ejs.render(",   SearchTarget.SCRIPT),
+                new FunctionSignature("ejs.compile(",  SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("nunjucks", List.of(
+                new FunctionSignature("nunjucks.renderString(", SearchTarget.SCRIPT),
+                new FunctionSignature("nunjucks.render(",       SearchTarget.SCRIPT),
+                new FunctionSignature("nunjucks.compile(",      SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("ember", List.of(
+                new FunctionSignature("Ember.Application.create(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("pug", List.of(
+                new FunctionSignature("pug.compile(", SearchTarget.SCRIPT),
+                new FunctionSignature("pug.render(",  SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("dust", List.of(
+                new FunctionSignature("dust.render(",  SearchTarget.SCRIPT),
+                new FunctionSignature("dust.compile(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("underscore", List.of(
+                new FunctionSignature("_.template(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("squirrelly", List.of(
+                new FunctionSignature("Sqrl.render(",  SearchTarget.SCRIPT),
+                new FunctionSignature("Sqrl.compile(", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("alpine", List.of(
+                new FunctionSignature("Alpine.start(", SearchTarget.SCRIPT)
+                // "x-data" removed – now detected by H3b TEMPLATE_ATTR_PATTERNS
+        ));
+        RENDER_FUNCTIONS.put("lit", List.of(
+                new FunctionSignature("html`",      SearchTarget.SCRIPT),
+                new FunctionSignature("LitElement", SearchTarget.SCRIPT)
+        ));
+        RENDER_FUNCTIONS.put("svelte", List.of(
+                new FunctionSignature("new App(",  SearchTarget.SCRIPT),
+                new FunctionSignature("__svelte",  SearchTarget.SCRIPT)
+        ));
+    }
+
+    static final Map<String, List<String>> SCRIPT_TYPE_PATTERNS = new LinkedHashMap<>();
+    static {
+        SCRIPT_TYPE_PATTERNS.put("handlebars", List.of(
+                "text/x-handlebars",
+                "text/x-handlebars-template"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("angular", List.of(
+                "text/ng-template"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("vue", List.of(
+                "text/x-template"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("underscore", List.of(
+                "text/template"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("tmpl", List.of(
+                "text/x-jquery-tmpl"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("mustache", List.of(
+                "text/x-mustache",
+                "text/x-mustache-template"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("icanhaz", List.of(
+                "text/html"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("hogan", List.of(
+                "text/html"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("ractive", List.of(
+                "text/ractive"
+        ));
+        SCRIPT_TYPE_PATTERNS.put("ember", List.of(
+                "text/x-handlebars",
+                "text/x-ember-template"
+        ));
+    }
+
+
+    static final Map<String, List<String>> TEMPLATE_ATTR_PATTERNS = new LinkedHashMap<>();
+    static {
+        TEMPLATE_ATTR_PATTERNS.put("angular", List.of(
+                "ng-app",
+                "ng-controller",
+                "ng-model",
+                "ng-bind",
+                "ng-repeat",
+                "ng-if",
+                "ng-show",
+                "ng-hide",
+                "ng-class",
+                "ng-click"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("vue", List.of(
+                "v-bind",
+                "v-model",
+                "v-if",
+                "v-else",
+                "v-for",
+                "v-on",
+                "v-show",
+                "v-html",
+                "v-text",
+                ":class",
+                "@click"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("mavo", List.of(
+                "mv-app",
+                "mv-multiple",
+                "mv-storage",
+                "mv-output",
+                "mv-attribute"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("alpine", List.of(
+                "x-data",
+                "x-bind",
+                "x-on",
+                "x-show",
+                "x-if",
+                "x-for",
+                "x-text",
+                "x-html",
+                "x-model",
+                "x-ref",
+                "x-effect",
+                "x-ignore",
+                "x-transition",
+                "x-cloak",
+                "@click",
+                ":class"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("ember", List.of(
+                "data-ember-action",
+                "ember-view",
+                "data-bindattr-"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("svelte", List.of(
+                "data-svelte-h",
+                "svelte-"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("knockoutjs", List.of(
+                "data-bind"
+        ));
+        TEMPLATE_ATTR_PATTERNS.put("ractive", List.of(
+                "data-ractive-css"
+        ));
+    }
+
+
+    private static final String GLOBAL_PROBE_PAYLOAD =
             "try {" +
                     "  var parts = String(arguments[0]).split('.');" +
                     "  var obj = window;" +
@@ -61,17 +253,80 @@ public class ClientSideEngineDetector {
                     "  return obj !== undefined && obj !== null;" +
                     "} catch (e) { return false; }";
 
-    public record DetectionResult(String engineName, String globalExpression) {
-        public boolean detected() {
-            return !"unknown".equals(engineName);
+
+    private static final String FUNCTION_CALL_PAYLOAD =
+            "try {" +
+                    "  var scripts = document.querySelectorAll('script:not([src])');" +
+                    "  var src = '';" +
+                    "  for (var i = 0; i < scripts.length; i++) {" +
+                    "    src += scripts[i].textContent + '\\n';" +
+                    "  }" +
+                    "  return JSON.stringify({" +
+                    "    script: src," +
+                    "    html: document.documentElement.outerHTML" +
+                    "  });" +
+                    "} catch(e) { return '{}'; }";
+
+
+    private static final String SCRIPT_TYPE_PAYLOAD =
+            "try {" +
+                    "  var tags = document.querySelectorAll('script[type]');" +
+                    "  var types = [];" +
+                    "  for (var i = 0; i < tags.length; i++) {" +
+                    "    var t = tags[i].getAttribute('type');" +
+                    "    if (t && types.indexOf(t) === -1) types.push(t);" +
+                    "  }" +
+                    "  return types.join('\\n');" +
+                    "} catch(e) { return ''; }";
+
+    private static final String TEMPLATE_ATTR_PAYLOAD =
+            "try {" +
+                    "  var seen = {};" +
+                    "  var all = document.querySelectorAll('*');" +
+                    "  for (var i = 0; i < all.length; i++) {" +
+                    "    var attrs = all[i].attributes;" +
+                    "    for (var j = 0; j < attrs.length; j++) {" +
+                    "      seen[attrs[j].name] = true;" +
+                    "    }" +
+                    "  }" +
+                    "  return Object.keys(seen).join('\\n');" +
+                    "} catch(e) { return ''; }";
+
+    public record DetectionResult(
+            String engineName,
+            String globalExpression,
+            List<String> matchedCalls,
+            List<String> matchedScriptTypes,
+            List<String> matchedTemplateAttrs) {
+
+        public DetectionResult(String engineName, String globalExpression) {
+            this(engineName, globalExpression, List.of(), List.of(), List.of());
+        }
+
+        public DetectionResult(String engineName, String globalExpression,
+                               List<String> matchedCalls) {
+            this(engineName, globalExpression, matchedCalls, List.of(), List.of());
+        }
+
+        public boolean detected()       { return !"unknown".equals(engineName); }
+        public boolean hasActiveCalls() { return !matchedCalls.isEmpty(); }
+
+        public boolean hasTagEvidence() {
+            return !matchedScriptTypes.isEmpty() || !matchedTemplateAttrs.isEmpty();
         }
 
         @Override
         public String toString() {
             if (!detected()) return "engine=unknown";
-            return String.format("engine=%-15s  global=%s", engineName, globalExpression);
+            String calls  = matchedCalls.isEmpty()        ? "none" : String.join(", ", matchedCalls);
+            String stypes = matchedScriptTypes.isEmpty()  ? "none" : String.join(", ", matchedScriptTypes);
+            String attrs  = matchedTemplateAttrs.isEmpty()? "none" : String.join(", ", matchedTemplateAttrs);
+            return String.format(
+                    "engine=%-15s  global=%s  activeCalls=[%s]  scriptTypes=[%s]  templateAttrs=[%s]",
+                    engineName, globalExpression, calls, stypes, attrs);
         }
     }
+
 
     public static DetectionResult detect(WebDriver driver, String url) {
         if (driver == null) return unknown();
@@ -84,35 +339,199 @@ public class ClientSideEngineDetector {
             LOGGER.warn("CSTI: engine detection interrupted for {}", url);
             return unknown();
         } catch (Exception e) {
-            LOGGER.warn(
-                    "CSTI: failed to load '{}' for engine detection ({}): {}",
-                    url,
-                    e.getClass().getSimpleName(),
-                    e.getMessage());
+            LOGGER.warn("CSTI: failed to load '{}' for engine detection ({}): {}",
+                    url, e.getClass().getSimpleName(), e.getMessage());
             return unknown();
         }
 
         JavascriptExecutor js = (JavascriptExecutor) driver;
 
+        String detectedEngine = null;
+        String detectedGlobal = null;
+
         for (Map.Entry<String, String> entry : TEMPLATES.entrySet()) {
-            String engine = entry.getKey();
-            String global = entry.getValue();
             try {
-                if (evalExpr(js, global)) {
-                    LOGGER.info("CSTI: engine '{}' detected via global '{}'", engine, global);
-                    return new DetectionResult(engine, global);
+                if (evalGlobal(js, entry.getValue())) {
+                    detectedEngine = entry.getKey();
+                    detectedGlobal = entry.getValue();
+                    LOGGER.info("CSTI: engine '{}' detected via global '{}'",
+                            detectedEngine, detectedGlobal);
+                    break;
                 }
-            } catch (Exception e) {
-                // Ignore per-engine probe errors and continue with remaining probes.
+            } catch (Exception ignored) {
             }
         }
 
-        LOGGER.warn("CSTI: no engine detected for {}", url);
-        return unknown();
+        if (detectedEngine == null) {
+            LOGGER.warn("CSTI: no engine detected for {}", url);
+            return unknown();
+        }
+
+        List<String> matchedCalls = scanForFunctionCalls(js, detectedEngine);
+        if (matchedCalls.isEmpty()) {
+            LOGGER.info("CSTI: global '{}' present but no active render calls found for {}",
+                    detectedGlobal, url);
+        } else {
+            LOGGER.info("CSTI: active render calls confirmed for '{}': {}",
+                    detectedEngine, matchedCalls);
+        }
+
+        List<String> matchedScriptTypes = scanForScriptTypes(js, detectedEngine);
+        if (matchedScriptTypes.isEmpty()) {
+            LOGGER.info("CSTI: no script-type template blocks found for engine '{}' at {}",
+                    detectedEngine, url);
+        } else {
+            LOGGER.info("CSTI: script-type template blocks confirmed for '{}': {}",
+                    detectedEngine, matchedScriptTypes);
+        }
+
+        List<String> matchedTemplateAttrs = scanForTemplateAttributes(js, detectedEngine);
+        if (matchedTemplateAttrs.isEmpty()) {
+            LOGGER.info("CSTI: no custom template attributes found for engine '{}' at {}",
+                    detectedEngine, url);
+        } else {
+            LOGGER.info("CSTI: custom template attributes confirmed for '{}': {}",
+                    detectedEngine, matchedTemplateAttrs);
+        }
+
+        return new DetectionResult(
+                detectedEngine, detectedGlobal,
+                matchedCalls, matchedScriptTypes, matchedTemplateAttrs);
     }
-    private static boolean evalExpr(JavascriptExecutor js, String global) {
-        Object result = js.executeScript(PAYLOAD, global);
+
+    public static boolean isTagHeuristicApplicable(String engine) {
+        if (engine == null || engine.isBlank() || "unknown".equals(engine)) {
+            return false;
+        }
+        List<String> scriptPatterns = SCRIPT_TYPE_PATTERNS.get(engine);
+        if (scriptPatterns != null && !scriptPatterns.isEmpty()) {
+            return true;
+        }
+        List<String> attrPatterns = TEMPLATE_ATTR_PATTERNS.get(engine);
+        return attrPatterns != null && !attrPatterns.isEmpty();
+    }
+
+
+    private static boolean evalGlobal(JavascriptExecutor js, String global) {
+        Object result = js.executeScript(GLOBAL_PROBE_PAYLOAD, global);
         return Boolean.TRUE.equals(result);
+    }
+
+    private static List<String> scanForFunctionCalls(JavascriptExecutor js, String engine) {
+        List<String> found = new ArrayList<>();
+
+        List<FunctionSignature> signatures = RENDER_FUNCTIONS.get(engine);
+        if (signatures == null || signatures.isEmpty()) {
+            LOGGER.debug("CSTI: no function signatures registered for engine '{}'", engine);
+            return found;
+        }
+
+        String scriptCorpus = "";
+        String htmlCorpus   = "";
+        try {
+            Object raw = js.executeScript(FUNCTION_CALL_PAYLOAD);
+            if (raw instanceof String json && !json.isBlank()) {
+                JsonNode node = JSON.readTree(json);
+                scriptCorpus  = node.path("script").asText("");
+                htmlCorpus    = node.path("html").asText("");
+            }
+        } catch (Exception e) {
+            LOGGER.warn("CSTI: failed to collect page sources: {}", e.getMessage());
+            return found;
+        }
+
+        for (FunctionSignature sig : signatures) {
+            String corpus = (sig.target() == SearchTarget.HTML) ? htmlCorpus : scriptCorpus;
+            if (corpus.contains(sig.signature())) {
+                LOGGER.debug("CSTI: matched signature '{}' in {} corpus",
+                        sig.signature(), sig.target());
+                found.add(sig.signature());
+            }
+        }
+
+        return found;
+    }
+
+    private static List<String> scanForScriptTypes(JavascriptExecutor js, String engine) {
+        List<String> found = new ArrayList<>();
+
+        List<String> patterns = SCRIPT_TYPE_PATTERNS.get(engine);
+        if (patterns == null || patterns.isEmpty()) {
+            LOGGER.debug("CSTI: no script-type patterns registered for engine '{}'", engine);
+            return found;
+        }
+
+        String corpus = "";
+        try {
+            Object raw = js.executeScript(SCRIPT_TYPE_PAYLOAD);
+            if (raw instanceof String s && !s.isBlank()) corpus = s;
+        } catch (Exception e) {
+            LOGGER.warn("CSTI: failed to collect script type attributes: {}", e.getMessage());
+            return found;
+        }
+
+        if (corpus.isBlank()) return found;
+
+        for (String typeValue : corpus.split("\n")) {
+            String normalised = typeValue.trim().toLowerCase(java.util.Locale.ROOT);
+            if (normalised.isBlank()) continue;
+
+            for (String pattern : patterns) {
+                if (normalised.contains(pattern.toLowerCase(java.util.Locale.ROOT))
+                        && !found.contains(typeValue)) {
+                    LOGGER.debug("CSTI:  script type '{}' matched pattern '{}'",
+                            typeValue, pattern);
+                    found.add(typeValue);
+                    break;
+                }
+            }
+        }
+
+        return found;
+    }
+
+
+    private static List<String> scanForTemplateAttributes(JavascriptExecutor js, String engine) {
+        List<String> found = new ArrayList<>();
+
+        List<String> patterns = TEMPLATE_ATTR_PATTERNS.get(engine);
+        if (patterns == null || patterns.isEmpty()) {
+            LOGGER.debug("CSTI: no template-attribute patterns registered for engine '{}'", engine);
+            return found;
+        }
+
+        String corpus = "";
+        try {
+            Object raw = js.executeScript(TEMPLATE_ATTR_PAYLOAD);
+            if (raw instanceof String s && !s.isBlank()) corpus = s;
+        } catch (Exception e) {
+            LOGGER.warn("CSTI:  failed to enumerate DOM attributes: {}", e.getMessage());
+            return found;
+        }
+
+        if (corpus.isBlank()) return found;
+
+        for (String rawAttr : corpus.split("\n")) {
+            String attrName = rawAttr.trim().toLowerCase(java.util.Locale.ROOT);
+            if (attrName.isBlank() || found.contains(attrName)) continue;
+
+            for (String pattern : patterns) {
+                String normPattern = pattern.toLowerCase(java.util.Locale.ROOT);
+
+                boolean matched = normPattern.endsWith("-")
+                        ? attrName.startsWith(normPattern)
+                        : attrName.contains(normPattern);
+
+                if (matched) {
+                    LOGGER.debug("CSTI: attribute '{}' matched pattern '{}'",
+                            attrName, pattern);
+                    found.add(attrName);
+                    break;
+                }
+            }
+        }
+
+        return found;
     }
 
     private static DetectionResult unknown() {
