@@ -12,10 +12,15 @@ import org.openqa.selenium.WebDriver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import static org.zaproxy.zap.extension.ascanrulesAlpha.CstiActiveScanRule.waitForPageToSettle;
+
 public class ClientSideEngineDetector {
 
     private static final Logger LOGGER = LogManager.getLogger(ClientSideEngineDetector.class);
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int PROBE_OPERAND = 11111;
+    private static final String PROBE_EXPECTED_RESULT =
+            Integer.toString(PROBE_OPERAND * PROBE_OPERAND);
 
     static final Map<String, String> TEMPLATES = new LinkedHashMap<>();
     static {
@@ -145,8 +150,7 @@ public class ClientSideEngineDetector {
         ));
         SCRIPT_TYPE_PATTERNS.put("vue", List.of(
                 "text/x-template"
-        ));
-        SCRIPT_TYPE_PATTERNS.put("underscore", List.of(
+        ));        SCRIPT_TYPE_PATTERNS.put("underscore", List.of(
                 "text/template"
         ));
         SCRIPT_TYPE_PATTERNS.put("tmpl", List.of(
@@ -161,9 +165,6 @@ public class ClientSideEngineDetector {
         ));
         SCRIPT_TYPE_PATTERNS.put("hogan", List.of(
                 "text/html"
-        ));
-        SCRIPT_TYPE_PATTERNS.put("ractive", List.of(
-                "text/ractive"
         ));
         SCRIPT_TYPE_PATTERNS.put("ember", List.of(
                 "text/x-handlebars",
@@ -233,12 +234,71 @@ public class ClientSideEngineDetector {
                 "data-svelte-h",
                 "svelte-"
         ));
-        TEMPLATE_ATTR_PATTERNS.put("knockoutjs", List.of(
-                "data-bind"
-        ));
-        TEMPLATE_ATTR_PATTERNS.put("ractive", List.of(
-                "data-ractive-css"
-        ));
+    }
+
+    public record PayloadDefinition(
+            String engineName,
+            String payload,
+            String expectedResult,
+            PayloadKind kind) {
+
+        public boolean supportsUniqueOperands() {
+            return kind == PayloadKind.MATH;
+        }
+
+        public PayloadDefinition withOperand(int operand) {
+            if (!supportsUniqueOperands()) {
+                return this;
+            }
+            String operandText = Integer.toString(operand);
+            return new PayloadDefinition(
+                    engineName,
+                    payload.replace(Integer.toString(PROBE_OPERAND), operandText),
+                    Long.toString((long) operand * operand),
+                    kind);
+        }
+    }
+
+    public enum PayloadKind {
+        MATH,
+        OBJECT
+    }
+
+    static final Map<String, PayloadDefinition> PAYLOAD_DEFINITIONS = new LinkedHashMap<>();
+    static {
+        registerMathPayload("angular", "{{11111*11111}}");
+        registerMathPayload("vue", "{{11111*11111}}");
+        registerMathPayload("mavo", "[11111*11111]");
+        registerObjectPayload("handlebars", "{{this}}");
+        registerMathPayload("regular", "{{11111*11111}}");
+        registerMathPayload("template7", "{{11111*11111}}");
+        registerMathPayload("ejs", "<%= 11111 * 11111 %>");
+        registerMathPayload("marko", "${11111 * 11111}");
+        registerMathPayload("tmpl", "${11111 * 11111}");
+        registerMathPayload("ember", "{{11111*11111}}");
+        registerMathPayload("jsrender", "{{:11111 * 11111}}");
+        registerMathPayload("dot", "{{=11111 * 11111}}");
+        registerMathPayload("art-template", "{{11111 * 11111}}");
+        registerObjectPayload("tempo", "{{this}}");
+        registerMathPayload("transparency", "{{11111 * 11111}}");
+        registerMathPayload("svelte", "{11111 * 11111}");
+        registerMathPayload("underscore", "<%= 11111 * 11111 %>");
+        registerMathPayload("lit", "${11111 * 11111}");
+        registerObjectPayload("mustache", "{{this}}");
+        registerMathPayload("hogan", "{{11111*11111}}");
+        registerMathPayload("twig", "{{11111*11111}}");
+        registerObjectPayload("markup", "{{this}}");
+        registerObjectPayload("dust", "{.}");
+        registerMathPayload("nunjucks", "{{11111*11111}}");
+        registerMathPayload("pug", "#{11111 * 11111}");
+        registerObjectPayload("loadTemplate", "{{this}}");
+        registerMathPayload("pure", "${11111 * 11111}");
+        registerMathPayload("squirrelly", "{{11111 * 11111}}");
+        registerMathPayload("swig", "{{11111*11111}}");
+        registerMathPayload("icanhaz", "{{11111*11111}}");
+        registerMathPayload("micro-template", "<%= 11111 * 11111 %>");
+        registerMathPayload("juicer", "${11111 * 11111}");
+        registerMathPayload("alpine", "{{11111*11111}}");
     }
 
 
@@ -292,6 +352,28 @@ public class ClientSideEngineDetector {
                     "  return Object.keys(seen).join('\\n');" +
                     "} catch(e) { return ''; }";
 
+    private static void registerMathPayload(
+            String engineName, String payload) {
+        registerPayload(engineName, payload, PROBE_EXPECTED_RESULT, PayloadKind.MATH);
+    }
+
+    private static void registerObjectPayload(
+            String engineName, String payload) {
+        registerPayload(engineName, payload, "[object Object]", PayloadKind.OBJECT);
+    }
+
+    private static void registerPayload(
+            String engineName, String payload, String expectedResult, PayloadKind kind) {
+        PAYLOAD_DEFINITIONS.put(
+                engineName,
+                new PayloadDefinition(
+                        engineName,
+                        payload,
+                        expectedResult,
+                        kind
+                ));
+    }
+
     public record DetectionResult(
             String engineName,
             String globalExpression,
@@ -333,11 +415,7 @@ public class ClientSideEngineDetector {
 
         try {
             driver.get(url);
-            Thread.sleep(1500);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOGGER.warn("CSTI: engine detection interrupted for {}", url);
-            return unknown();
+            waitForPageToSettle(driver);
         } catch (Exception e) {
             LOGGER.warn("CSTI: failed to load '{}' for engine detection ({}): {}",
                     url, e.getClass().getSimpleName(), e.getMessage());
@@ -409,6 +487,10 @@ public class ClientSideEngineDetector {
         }
         List<String> attrPatterns = TEMPLATE_ATTR_PATTERNS.get(engine);
         return attrPatterns != null && !attrPatterns.isEmpty();
+    }
+
+    public static PayloadDefinition getPayloadDefinition(String engine) {
+        return PAYLOAD_DEFINITIONS.get(engine);
     }
 
 

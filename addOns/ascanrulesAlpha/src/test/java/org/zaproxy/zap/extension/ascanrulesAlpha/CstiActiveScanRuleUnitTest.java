@@ -21,8 +21,11 @@ package org.zaproxy.zap.extension.ascanrulesAlpha;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
@@ -97,6 +100,10 @@ class CstiActiveScanRuleUnitTest {
 		given(driver.executeScript(anyString(), any()))
 				.willAnswer(
 						invocation -> {
+							String payload = invocation.getArgument(0, String.class);
+							if (payload.contains("__zapCstiWaitState")) {
+								return Boolean.TRUE;
+							}
 							if (calls.getAndIncrement() == 0) {
 								throw new RuntimeException("first engine check failed");
 							}
@@ -206,6 +213,21 @@ class CstiActiveScanRuleUnitTest {
 	}
 
 	@Test
+	void shouldNotReportConfidenceWhenNoEngineIsDetected() {
+		DetectionResult result = new DetectionResult("unknown", "");
+
+		String report =
+				CstiActiveScanRule.buildEngineDetectionReport(
+						java.util.List.of("Input [id=q]"),
+						java.util.List.of(),
+						result,
+						CstiActiveScanRule.EngineConfidence.LOW);
+
+		assertThat(report, containsString("Engine : not detected via JS global check"));
+		assertThat(report, not(containsString("Detection confidence")));
+	}
+
+	@Test
 	void shouldStripQueryAndFragmentFromUrl() {
 		// Given
 		CstiActiveScanRule rule = new CstiActiveScanRule();
@@ -253,6 +275,122 @@ class CstiActiveScanRuleUnitTest {
 		assertThat(resolved, is(equalTo(Browser.FIREFOX_HEADLESS)));
 	}
 
+	@Test
+	void shouldProvidePayloadProfileForAngular() {
+		ClientSideEngineDetector.PayloadDefinition payload =
+				ClientSideEngineDetector.getPayloadDefinition("angular");
+
+		assertThat(payload, is(notNullValue()));
+		assertThat(payload.payload(), is(equalTo("{{11111*11111}}")));
+		assertThat(payload.expectedResult(), is(equalTo("123454321")));
+	}
+
+	@Test
+	void shouldProvidePayloadProfileForArtTemplate() {
+		ClientSideEngineDetector.PayloadDefinition payload =
+				ClientSideEngineDetector.getPayloadDefinition("art-template");
+
+		assertThat(payload, is(notNullValue()));
+		assertThat(payload.payload(), is(equalTo("{{11111 * 11111}}")));
+		assertThat(payload.expectedResult(), is(equalTo("123454321")));
+	}
+
+	@Test
+	void shouldCreateUniqueOperandPayloadForMathProfiles() {
+		ClientSideEngineDetector.PayloadDefinition payload =
+				ClientSideEngineDetector.getPayloadDefinition("angular").withOperand(11112);
+
+		assertThat(payload.supportsUniqueOperands(), is(equalTo(true)));
+		assertThat(payload.payload(), is(equalTo("{{11112*11112}}")));
+		assertThat(payload.expectedResult(), is(equalTo("123476544")));
+	}
+
+	@Test
+	void shouldProvidePayloadProfileForEveryDetectedTemplateEngine() {
+		for (String engine :
+				java.util.List.of(
+						"angular",
+						"vue",
+						"mavo",
+						"handlebars",
+						"regular",
+						"template7",
+						"ejs",
+						"marko",
+						"tmpl",
+						"ember",
+						"jsrender",
+						"dot",
+						"art-template",
+						"tempo",
+						"transparency",
+						"svelte",
+						"underscore",
+						"lit",
+						"mustache",
+						"hogan",
+						"twig",
+						"markup",
+						"dust",
+						"nunjucks",
+						"pug",
+						"loadTemplate",
+						"pure",
+						"squirrelly",
+						"swig",
+						"icanhaz",
+						"micro-template",
+						"juicer",
+						"alpine")) {
+			assertThat(engine, ClientSideEngineDetector.getPayloadDefinition(engine), is(notNullValue()));
+		}
+	}
+
+	@Test
+	void shouldProvideObjectPayloadProfileForHandlebars() {
+		ClientSideEngineDetector.PayloadDefinition payload =
+				ClientSideEngineDetector.getPayloadDefinition("handlebars");
+
+		assertThat(payload, is(notNullValue()));
+		assertThat(payload.payload(), is(equalTo("{{this}}")));
+		assertThat(payload.expectedResult(), is(equalTo("[object Object]")));
+		assertThat(payload.supportsUniqueOperands(), is(equalTo(false)));
+	}
+
+	@Test
+	void shouldProvideObjectPayloadProfileForMustache() {
+		ClientSideEngineDetector.PayloadDefinition payload =
+				ClientSideEngineDetector.getPayloadDefinition("mustache");
+
+		assertThat(payload, is(notNullValue()));
+		assertThat(payload.payload(), is(equalTo("{{this}}")));
+		assertThat(payload.expectedResult(), is(equalTo("[object Object]")));
+	}
+
+	@Test
+	void shouldProvideObjectPayloadProfilesForNonMathEngines() {
+		for (String engine :
+				java.util.List.of("handlebars", "tempo", "mustache", "markup", "dust", "loadTemplate")) {
+			ClientSideEngineDetector.PayloadDefinition payload =
+					ClientSideEngineDetector.getPayloadDefinition(engine);
+
+			assertThat(payload, is(notNullValue()));
+			assertThat(payload.expectedResult(), is(equalTo("[object Object]")));
+		}
+	}
+
+	@Test
+	void shouldReplaceMatchingQueryParameterOnly() {
+		String replaced =
+				CstiActiveScanRule.replaceParameterValue(
+						"https://example.test/search?q=old&page=2#frag", "q", "{{11111*11111}}");
+
+		assertThat(
+				replaced,
+				is(
+						equalTo(
+								"https://example.test/search?q=%7B%7B11111*11111%7D%7D&page=2#frag")));
+	}
+
 	private interface TestWebDriver extends WebDriver, JavascriptExecutor {}
 }
-
