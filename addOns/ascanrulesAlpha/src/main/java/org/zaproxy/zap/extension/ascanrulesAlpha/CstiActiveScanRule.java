@@ -1722,6 +1722,8 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             sb.append("\nMatched: yes\n");
             sb.append("Confirmed matches:\n");
             for (ProbeResult result : probeSummary.confirmed()) {
+                sb.append("  Payload: ").append(result.payload()).append("\n");
+                sb.append("  Expected result: ").append(result.expectedResult()).append("\n");
                 sb.append("  Observed result: ").append(result.observedResult()).append("\n");
                 sb.append("  Vector: ").append(result.vector()).append("\n");
                 sb.append("  Source: ").append(result.source()).append("\n");
