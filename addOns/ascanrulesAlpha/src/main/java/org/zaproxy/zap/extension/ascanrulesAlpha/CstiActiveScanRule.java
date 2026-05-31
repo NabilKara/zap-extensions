@@ -371,19 +371,27 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             String observedResult,
             String evidence) {}
 
-    private record ProbeSummary(List<String> attempts, ProbeResult confirmed) {}
+    private record ProbeSummary(List<String> attempts, List<ProbeResult> confirmed) {}
 
     private record DomInputProbe(
             InputSurface surface, ClientSideEngineDetector.PayloadDefinition payloadDefinition) {}
 
+    private record SurfaceReport(
+            List<InputSurface> inputSurfaces,
+            List<LinkSurface> linkSurfaces,
+            List<UrlParameterSurface> urlParamSurfaces,
+            List<String> inputFindings,
+            List<String> linkFindings,
+            List<String> urlParamFindings,
+            List<String> allFindings) {}
 
     private static final Duration CSTI_WAIT_TIMEOUT = Duration.ofSeconds(4);
     private static final Duration CSTI_POLL_INTERVAL = Duration.ofMillis(100);
     private static final long DOM_QUIET_MILLIS = 200;
 
     private static final String PAGE_SETTLED_PAYLOAD =
-            "try {"
-                    + "  var quietMillis = Number(arguments[0] || 200);"
+            "try {" +
+                    "  var quietMillis = Number(arguments[0] || 200);"
                     + "  if (!window.__zapCstiWaitState) {"
                     + "    window.__zapCstiWaitState = { lastMutation: Date.now() };"
                     + "    new MutationObserver(function() {"
@@ -577,6 +585,64 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             return;
         }
 
+        SurfaceReport surfaceReport = buildSurfaceReport(msg, fullUrl, extClient);
+        if (surfaceReport == null) {
+            LOGGER.debug("CSTI: no usable components for {} (spider + HTML + URL params all empty).", fullUrl);
+            return;
+        }
+
+        // Phase B – engine detection.
+        String canonicalUrl = deduplicationKey(fullUrl);
+        ClientSideEngineDetector.DetectionResult engine = detectEngine(canonicalUrl);
+        EngineConfidence engineConfidence = scoreEngineDetectionConfidence(engine);
+
+        LOGGER.info(
+                "CSTI: {} input(s), {} link(s), {} URL param surface(s) for {}",
+                surfaceReport.inputFindings().size(),
+                surfaceReport.linkFindings().size(),
+                surfaceReport.urlParamFindings().size(),
+                fullUrl);
+        surfaceReport.allFindings().forEach(f -> LOGGER.info("  {}", f));
+
+        newAlert()
+                .setRisk(Alert.RISK_INFO)
+                .setConfidence(toZapAlertConfidence(engineConfidence))
+                .setName(getName() + " [engine detection]")
+                .setDescription(
+                        buildEngineDetectionReport(
+                                surfaceReport.inputFindings(),
+                                surfaceReport.linkFindings(),
+                                engine,
+                                engineConfidence))
+                .setMessage(msg)
+                .raise();
+
+        ClientSideEngineDetector.PayloadDefinition payloadDefinition =
+                ClientSideEngineDetector.getPayloadDefinition(engine.engineName());
+        ProbeSummary probeSummary =
+                probeForCsti(
+                        canonicalUrl,
+                        surfaceReport.inputSurfaces(),
+                        surfaceReport.urlParamSurfaces(),
+                        engine,
+                        payloadDefinition);
+
+        newAlert()
+                .setRisk(Alert.RISK_INFO)
+                .setConfidence(payloadDefinition != null ? Alert.CONFIDENCE_MEDIUM : Alert.CONFIDENCE_LOW)
+                .setName(getName() + " [payload probe]")
+                .setDescription(buildProbeReport(engine, payloadDefinition, probeSummary))
+                .setMessage(msg)
+                .raise();
+
+        if (!probeSummary.confirmed().isEmpty()) {
+            raiseConfirmedCstiAlert(msg, engine, engineConfidence, probeSummary.confirmed().get(0));
+        }
+    }
+
+    private SurfaceReport buildSurfaceReport(
+            HttpMessage msg, String fullUrl, ExtensionClientIntegration extClient) {
+
         // Phase A – gather injection surfaces.
         List<InputSurface> inputSurfaces = new ArrayList<>();
         List<LinkSurface> linkSurfaces = new ArrayList<>();
@@ -584,15 +650,19 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         ClientNode node = resolveNode(extClient, fullUrl);
         if (node != null) {
             collectFindings(node, inputSurfaces, linkSurfaces);
-            LOGGER.debug("CSTI: spider yielded {} input(s), {} link(s) for {}",
-                    inputSurfaces.size(), linkSurfaces.size(), fullUrl);
+            LOGGER.debug(
+                    "CSTI: spider yielded {} input(s), {} link(s) for {}",
+                    inputSurfaces.size(),
+                    linkSurfaces.size(),
+                    fullUrl);
         } else {
             LOGGER.debug("CSTI: no client spider node for {}.", fullUrl);
         }
 
         supplementFromResponseHtml(msg, inputSurfaces);
 
-        List<UrlParameterSurface> urlParamSurfaces = collectUrlParameterSurfaces(fullUrl, linkSurfaces);
+        List<UrlParameterSurface> urlParamSurfaces =
+                collectUrlParameterSurfaces(fullUrl, linkSurfaces);
 
         List<String> inputFindings = describeInputs(inputSurfaces);
         List<String> linkFindings = describeLinks(linkSurfaces);
@@ -603,61 +673,18 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         allFindings.addAll(urlParamFindings);
 
         if (allFindings.isEmpty()) {
-            LOGGER.debug("CSTI: no usable components for {} (spider + HTML + URL params all empty).", fullUrl);
-            return;
+            return null;
         }
 
-        // Phase B – engine detection.
-        String canonicalUrl = deduplicationKey(fullUrl);
-        ClientSideEngineDetector.DetectionResult engine = detectEngine(canonicalUrl);
-        EngineConfidence engineConfidence = scoreEngineDetectionConfidence(engine);
-
-        // Step-1 alert.
-        LOGGER.info("CSTI step-1: {} input(s), {} link(s), {} URL param surface(s) for {}",
-                inputFindings.size(), linkFindings.size(), urlParamFindings.size(), fullUrl);
-        allFindings.forEach(f -> LOGGER.info("  {}", f));
-
-        newAlert()
-                .setRisk(Alert.RISK_INFO)
-                .setConfidence(Alert.CONFIDENCE_HIGH)
-                .setName(getName() + " [step-1 discovery]")
-                .setDescription("Client Spider data found for this URL.")
-                .setOtherInfo(String.join("\n", allFindings))
-                .setMessage(msg)
-                .raise();
-
-        // Step-2 alert.
-        newAlert()
-                .setRisk(Alert.RISK_INFO)
-                .setConfidence(toZapAlertConfidence(engineConfidence))
-                .setName(getName() + " [step-2 engine detection]")
-                .setDescription(buildEngineDetectionReport(inputFindings, linkFindings, engine, engineConfidence))
-                .setMessage(msg)
-                .raise();
-
-        ClientSideEngineDetector.PayloadDefinition payloadDefinition =
-                ClientSideEngineDetector.getPayloadDefinition(engine.engineName());
-        ProbeSummary probeSummary =
-                probeForCsti(
-                        canonicalUrl,
-                        inputSurfaces,
-                        urlParamSurfaces,
-                        engine,
-                        payloadDefinition);
-
-        newAlert()
-                .setRisk(Alert.RISK_INFO)
-                .setConfidence(payloadDefinition != null ? Alert.CONFIDENCE_MEDIUM : Alert.CONFIDENCE_LOW)
-                .setName(getName() + " [step-3 payload probe]")
-                .setDescription(buildProbeReport(engine, payloadDefinition, probeSummary))
-                .setMessage(msg)
-                .raise();
-
-        if (probeSummary.confirmed() != null) {
-            raiseConfirmedCstiAlert(msg, engine, engineConfidence, probeSummary.confirmed());
-        }
+        return new SurfaceReport(
+                inputSurfaces,
+                linkSurfaces,
+                urlParamSurfaces,
+                inputFindings,
+                linkFindings,
+                urlParamFindings,
+                allFindings);
     }
-
 
     String deduplicationKey(String fullUrl) {
         String bare = stripQueryAndFragment(fullUrl);
@@ -796,7 +823,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
 
     private ClientSideEngineDetector.DetectionResult detectEngine(String url) {
-        LOGGER.info("CSTI: step-2 engine detection starting for {}", url);
+        LOGGER.info("CSTI: engine detection starting for {}", url);
         long lockStart = System.nanoTime();
         browserLock.lock();
         try {
@@ -815,7 +842,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             }
 
             ClientSideEngineDetector.DetectionResult result = ClientSideEngineDetector.detect(driver, url);
-            LOGGER.info("CSTI: step-2 result for {} -> {}", url, result);
+            LOGGER.info("CSTI: engine detection result for {} -> {}", url, result);
             return result;
         } finally {
             browserLock.unlock();
@@ -961,12 +988,12 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         List<String> attempts = new ArrayList<>();
         if (!engine.detected()) {
             attempts.add("Skipped: no client-side engine was detected.");
-            return new ProbeSummary(attempts, null);
+            return new ProbeSummary(attempts, List.of());
         }
 
         if (payloadDefinition == null) {
             attempts.add("Skipped: no payload profile is registered for engine '" + engine.engineName() + "'.");
-            return new ProbeSummary(attempts, null);
+            return new ProbeSummary(attempts, List.of());
         }
 
         long lockStart = System.nanoTime();
@@ -984,7 +1011,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             }
             if (!isDriverUsable(driver)) {
                 attempts.add("Skipped: no usable WebDriver available for payload probing.");
-                return new ProbeSummary(attempts, null);
+                return new ProbeSummary(attempts, List.of());
             }
 
             // Filter out URL parameters that belong to other pages (CLIENT_LINK).
@@ -995,17 +1022,17 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
             ProbeResult urlProbe = probeUrlParameters(driver, ownPageUrlParams, payloadDefinition, attempts);
             if (urlProbe != null) {
-                return new ProbeSummary(attempts, urlProbe);
+                return new ProbeSummary(attempts, List.of(urlProbe));
             }
 
-            ProbeResult inputProbe =
+            List<ProbeResult> inputProbes =
                     probeDomInputs(
                             driver,
                             pageUrl,
                             deduplicateInputSurfacesForProbe(inputSurfaces),
                             payloadDefinition,
                             attempts);
-            return new ProbeSummary(attempts, inputProbe);
+            return new ProbeSummary(attempts, inputProbes);
         } finally {
             browserLock.unlock();
         }
@@ -1015,11 +1042,23 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         List<InputSurface> deduplicated = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
         for (InputSurface surface : inputSurfaces) {
-            if (seen.add(surface.probeKey())) {
+            if (seen.add(probeDedupKey(surface))) {
                 deduplicated.add(surface);
             }
         }
         return deduplicated;
+    }
+
+    private static String probeDedupKey(InputSurface surface) {
+        String tag = nullToEmpty(surface.tag());
+        String inputType = nullToEmpty(surface.inputType());
+        if (!nullToEmpty(surface.id()).isBlank()) {
+            return String.join("|", tag, "id", nullToEmpty(surface.id()), inputType);
+        }
+        if (!nullToEmpty(surface.name()).isBlank()) {
+            return String.join("|", tag, "name", nullToEmpty(surface.name()), inputType);
+        }
+        return surface.probeKey();
     }
 
     private ProbeResult probeUrlParameters(
@@ -1034,38 +1073,48 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             if (tested++ >= maxProbes || isStop()) {
                 break;
             }
-            ReflectionSnapshot baseline = loadAndSnapshot(driver, surface.targetUrl(), payloadDefinition.expectedResult());
+            ReflectionSnapshot baseline =
+                    loadAndSnapshot(driver, surface.targetUrl(), payloadDefinition.expectedResult());
             if (baseline == null) {
-                attempts.add(formatProbeAttempt("URL param [" + surface.paramName() + "] via " + surface.source(),
-                        "skipped", false, "baseline capture failed"));
+                attempts.add(
+                        formatProbeAttempt(
+                                "URL param [" + surface.paramName() + "] via " + surface.source(),
+                                "skipped",
+                                false,
+                                "baseline capture failed"));
                 continue;
             }
 
-            String attackUrl = replaceParameterValue(surface.targetUrl(), surface.paramName(), payloadDefinition.payload());
+            String attackUrl =
+                    replaceParameterValue(
+                            surface.targetUrl(),
+                            surface.paramName(),
+                            payloadDefinition.payload());
             if (attackUrl == null) {
-                attempts.add(formatProbeAttempt("URL param [" + surface.paramName() + "] via " + surface.source(),
-                        "skipped", false, "attack URL could not be built"));
+                attempts.add(
+                        formatProbeAttempt(
+                                "URL param [" + surface.paramName() + "] via " + surface.source(),
+                                "skipped",
+                                false,
+                                "attack URL could not be built"));
                 continue;
             }
 
-            ReflectionSnapshot attacked = loadAndSnapshot(driver, attackUrl, payloadDefinition.expectedResult());
+            ReflectionSnapshot attacked =
+                    loadAndSnapshot(driver, attackUrl, payloadDefinition.expectedResult());
             if (attacked == null) {
-                attempts.add(formatProbeAttempt("URL param [" + surface.paramName() + "] via " + surface.source(),
-                        "skipped", false, "attack page load failed"));
+                attempts.add(
+                        formatProbeAttempt(
+                                "URL param [" + surface.paramName() + "] via " + surface.source(),
+                                "skipped",
+                                false,
+                                "attack page load failed"));
                 continue;
             }
 
             boolean matched = attacked.exceeds(baseline);
             String observedResult = matched ? payloadDefinition.expectedResult() : "not observed";
-            String evidence =
-                    "expected result counts text/html "
-                            + baseline.textMatches()
-                            + "/"
-                            + baseline.htmlMatches()
-                            + " -> "
-                            + attacked.textMatches()
-                            + "/"
-                            + attacked.htmlMatches();
+            String evidence = reflectionEvidence(baseline, attacked);
             attempts.add(
                     formatProbeAttempt(
                             "URL param [" + surface.paramName() + "] via " + surface.source(),
@@ -1115,7 +1164,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         }
     }
 
-    private ProbeResult probeDomInputs(
+    private List<ProbeResult> probeDomInputs(
             WebDriver driver,
             String pageUrl,
             List<InputSurface> inputSurfaces,
@@ -1129,7 +1178,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         return probeDomInputsIndividually(driver, pageUrl, inputSurfaces, payloadDefinition, attempts);
     }
 
-    private ProbeResult probeDomInputsWithUniquePayloads(
+    private List<ProbeResult> probeDomInputsWithUniquePayloads(
             WebDriver driver,
             String pageUrl,
             List<InputSurface> inputSurfaces,
@@ -1151,7 +1200,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         }
 
         if (probes.isEmpty()) {
-            return null;
+            return List.of();
         }
 
         JavascriptExecutor js = (JavascriptExecutor) driver;
@@ -1160,7 +1209,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             waitForPageToSettle(driver);
         } catch (Exception e) {
             attempts.add(formatProbeAttempt("DOM input batch", "skipped", false, "page load failed"));
-            return null;
+            return List.of();
         }
 
         Map<DomInputProbe, ReflectionSnapshot> baselines = new LinkedHashMap<>();
@@ -1176,7 +1225,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
         }
 
         if (baselines.isEmpty()) {
-            return null;
+            return List.of();
         }
 
         Object result;
@@ -1184,19 +1233,32 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             result = js.executeScript(FORM_INJECTION_PAYLOAD, buildInjectionSpecs(probes));
             waitForPageToSettle(driver);
         } catch (Exception e) {
-            attempts.add(formatProbeAttempt("DOM input batch", "skipped", false, "injection script failed"));
-            return null;
+            attempts.add(
+                    formatProbeAttempt(
+                            "DOM input batch",
+                            "skipped",
+                            false,
+                            "injection script failed" + formatProbeError(e.getMessage())));
+            return List.of();
         }
 
         if (!(result instanceof java.util.Map<?, ?> data)
                 || !Boolean.TRUE.equals(data.get("found"))) {
-            attempts.add(formatProbeAttempt("DOM input batch", "skipped", false, "no target inputs found"));
-            return null;
+            String error = result instanceof java.util.Map<?, ?> dataMap
+                    ? safeProbeError(dataMap.get("error"))
+                    : null;
+            attempts.add(
+                    formatProbeAttempt(
+                            "DOM input batch",
+                            "skipped",
+                            false,
+                            error != null ? "injection error" + formatProbeError(error) : "no target inputs found"));
+            return List.of();
         }
 
         Set<Integer> foundIndexes = targetIndexes(data.get("targets"));
         boolean submitted = Boolean.TRUE.equals(data.get("submitted"));
-        ProbeResult confirmed = null;
+        List<ProbeResult> confirmed = new ArrayList<>();
         for (int i = 0; i < probes.size(); i++) {
             DomInputProbe probe = probes.get(i);
             if (!baselines.containsKey(probe)) {
@@ -1209,7 +1271,8 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             }
 
             ClientSideEngineDetector.PayloadDefinition actualPayload = probe.payloadDefinition();
-            ReflectionSnapshot attacked = captureSnapshot(js, actualPayload.expectedResult());
+            ReflectionSnapshot attacked =
+                    waitForSnapshotChange(driver, actualPayload.expectedResult(), baselines.get(probe));
             if (attacked == null) {
                 attempts.add(formatProbeAttempt("Input [" + probe.surface().describe() + "]",
                         "skipped", false, "attack snapshot failed"));
@@ -1229,8 +1292,8 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                                     ? "form submitted; unique operand payload"
                                     : "unique operand payload"));
 
-            if (matched && confirmed == null) {
-                confirmed =
+            if (matched) {
+                confirmed.add(
                         new ProbeResult(
                                 "dom-input",
                                 probe.surface().describe(),
@@ -1238,14 +1301,14 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                                 actualPayload.payload(),
                                 actualPayload.expectedResult(),
                                 observedResult,
-                                evidence);
+                                evidence));
             }
         }
 
         return confirmed;
     }
 
-    private ProbeResult probeDomInputsIndividually(
+    private List<ProbeResult> probeDomInputsIndividually(
             WebDriver driver,
             String pageUrl,
             List<InputSurface> inputSurfaces,
@@ -1292,20 +1355,26 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                 waitForPageToSettle(driver);
             } catch (Exception e) {
                 attempts.add(formatProbeAttempt("Input [" + surface.describe() + "]",
-                        "skipped", false, "injection script failed"));
+                        "skipped", false, "injection script failed" + formatProbeError(e.getMessage())));
                 continue;
             }
 
             if (!(result instanceof java.util.Map<?, ?> data)
                     || !Boolean.TRUE.equals(data.get("found"))) {
+                String error = result instanceof java.util.Map<?, ?> dataMap
+                        ? safeProbeError(dataMap.get("error"))
+                        : null;
                 attempts.add(formatProbeAttempt("Input [" + surface.describe() + "]",
-                        "skipped", false, "target not found"));
+                        "skipped",
+                        false,
+                        error != null ? "injection error" + formatProbeError(error) : "target not found"));
                 continue;
             }
 
             boolean submitted = Boolean.TRUE.equals(data.get("submitted"));
 
-            ReflectionSnapshot attacked = captureSnapshot(js, payloadDefinition.expectedResult());
+            ReflectionSnapshot attacked =
+                    waitForSnapshotChange(driver, payloadDefinition.expectedResult(), baseline);
             if (attacked == null) {
                 attempts.add(formatProbeAttempt("Input [" + surface.describe() + "]",
                         "skipped", false, "attack snapshot failed"));
@@ -1314,15 +1383,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
             boolean matched = attacked.exceeds(baseline);
             String observedResult = matched ? payloadDefinition.expectedResult() : "not observed";
-            String evidence =
-                    "expected result counts text/html "
-                            + baseline.textMatches()
-                            + "/"
-                            + baseline.htmlMatches()
-                            + " -> "
-                            + attacked.textMatches()
-                            + "/"
-                            + attacked.htmlMatches();
+            String evidence = reflectionEvidence(baseline, attacked);
             attempts.add(
                     formatProbeAttempt(
                             "Input [" + surface.describe() + "]",
@@ -1331,18 +1392,33 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                             submitted ? "form submitted; other form fields filled" : "other form fields filled"));
 
             if (matched) {
-                return new ProbeResult(
-                        "dom-input",
-                        surface.describe(),
-                        pageUrl,
-                        payloadDefinition.payload(),
-                        payloadDefinition.expectedResult(),
-                        observedResult,
-                        evidence);
+                return List.of(
+                        new ProbeResult(
+                                "dom-input",
+                                surface.describe(),
+                                pageUrl,
+                                payloadDefinition.payload(),
+                                payloadDefinition.expectedResult(),
+                                observedResult,
+                                evidence));
             }
         }
 
+        return List.of();
+    }
+
+    private static String safeProbeError(Object raw) {
+        if (raw instanceof String text && !text.isBlank()) {
+            return text;
+        }
         return null;
+    }
+
+    private static String formatProbeError(String error) {
+        if (error == null || error.isBlank()) {
+            return "";
+        }
+        return ": " + error;
     }
 
     private static List<Map<String, Object>> buildInjectionSpecs(List<DomInputProbe> probes) {
@@ -1619,17 +1695,6 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             sb.append("Engine : not detected via JS global check\n");
         }
 
-        sb.append("\nInjection surfaces on this page:\n");
-        if (inputFindings.isEmpty()) {
-            sb.append("  none\n");
-        } else {
-            inputFindings.forEach(f -> sb.append("  ").append(f).append("\n"));
-        }
-
-        if (!linkFindings.isEmpty()) {
-            sb.append("\nLinks to other pages:\n");
-            linkFindings.forEach(f -> sb.append("  ").append(f).append("\n"));
-        }
 
         return sb.toString().trim();
     }
@@ -1641,7 +1706,11 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
 
         StringBuilder sb = new StringBuilder();
         sb.append("Engine: ").append(engine.engineName()).append("\n");
-        if (payloadDefinition == null) {
+        if (!probeSummary.confirmed().isEmpty()) {
+            ProbeResult primary = probeSummary.confirmed().get(0);
+            sb.append("Payload: ").append(primary.payload()).append("\n");
+            sb.append("Expected result: ").append(primary.expectedResult()).append("\n");
+        } else if (payloadDefinition == null) {
             sb.append("Payload: unavailable\n");
             sb.append("Expected result: unavailable\n");
         } else {
@@ -1649,18 +1718,14 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
             sb.append("Expected result: ").append(payloadDefinition.expectedResult()).append("\n");
         }
 
-        sb.append("\nResults:\n");
-        if (probeSummary.attempts().isEmpty()) {
-            sb.append("  none\n");
-        } else {
-            probeSummary.attempts().forEach(attempt -> sb.append("  ").append(attempt).append("\n"));
-        }
-
-        if (probeSummary.confirmed() != null) {
+        if (!probeSummary.confirmed().isEmpty()) {
             sb.append("\nMatched: yes\n");
-            sb.append("Observed result: ").append(probeSummary.confirmed().observedResult()).append("\n");
-            sb.append("Vector: ").append(probeSummary.confirmed().vector()).append("\n");
-            sb.append("Source: ").append(probeSummary.confirmed().source()).append("\n");
+            sb.append("Confirmed matches:\n");
+            for (ProbeResult result : probeSummary.confirmed()) {
+                sb.append("  Observed result: ").append(result.observedResult()).append("\n");
+                sb.append("  Vector: ").append(result.vector()).append("\n");
+                sb.append("  Source: ").append(result.source()).append("\n");
+            }
         } else {
             sb.append("\nMatched: no\n");
             sb.append("Observed result: not observed\n");
@@ -1729,3 +1794,4 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
     @Override public String getSolution()    { return Constant.messages.getString(MESSAGE_PREFIX + "soln"); }
     @Override public String getReference()   { return Constant.messages.getString(MESSAGE_PREFIX + "refs"); }
 }
+
