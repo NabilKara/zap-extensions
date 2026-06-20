@@ -142,6 +142,7 @@ public class SqlInjectionMsSqlTimingScanRule extends AbstractAppParamPlugin
         Map<String, String> alertTags =
                 new HashMap<>(
                         CommonAlertTag.toMap(
+                                CommonAlertTag.OWASP_2025_A05_INJECTION,
                                 CommonAlertTag.OWASP_2021_A03_INJECTION,
                                 CommonAlertTag.OWASP_2017_A01_INJECTION,
                                 CommonAlertTag.WSTG_V42_INPV_05_SQLI,
@@ -242,9 +243,7 @@ public class SqlInjectionMsSqlTimingScanRule extends AbstractAppParamPlugin
                         message.compareAndSet(null, msg);
 
                         String finalPayload =
-                                sleepPayload
-                                        .replace(ORIG_VALUE_TOKEN, paramValue)
-                                        .replace(SLEEP_TOKEN, getSleepToken((int) x));
+                                assembleTimingPayload(sleepPayload, paramValue, (int) x);
 
                         setParameter(msg, paramName, finalPayload);
                         LOGGER.debug("Testing [{}] = [{}]", paramName, finalPayload);
@@ -269,20 +268,13 @@ public class SqlInjectionMsSqlTimingScanRule extends AbstractAppParamPlugin
                             paramName,
                             attack.get());
 
-                    String extraInfo =
-                            Constant.messages.getString(
-                                    "ascanrules.sqlinjection.mssql.alert.timebased.extrainfo",
+                    buildAlert(
+                                    getBaseMsg().getRequestHeader().getURI().toString(),
+                                    paramName,
+                                    paramValue,
                                     attack.get(),
                                     message.get().getTimeElapsedMillis(),
-                                    paramValue,
-                                    getBaseMsg().getTimeElapsedMillis());
-
-                    newAlert()
-                            .setConfidence(Alert.CONFIDENCE_MEDIUM)
-                            .setUri(getBaseMsg().getRequestHeader().getURI().toString())
-                            .setParam(paramName)
-                            .setAttack(attack.get())
-                            .setOtherInfo(extraInfo)
+                                    getBaseMsg().getTimeElapsedMillis())
                             .setMessage(message.get())
                             .raise();
                     break;
@@ -301,6 +293,49 @@ public class SqlInjectionMsSqlTimingScanRule extends AbstractAppParamPlugin
                         ex);
             }
         }
+    }
+
+    private static String assembleTimingPayload(
+            String template, String paramValue, int sleepSeconds) {
+        return template.replace(ORIG_VALUE_TOKEN, paramValue)
+                .replace(SLEEP_TOKEN, getSleepToken(sleepSeconds));
+    }
+
+    private AlertBuilder buildAlert(
+            String uri,
+            String paramName,
+            String paramValue,
+            String attackValue,
+            long attackElapsedMillis,
+            long originalElapsedMillis) {
+        return newAlert()
+                .setConfidence(Alert.CONFIDENCE_MEDIUM)
+                .setUri(uri)
+                .setParam(paramName)
+                .setAttack(attackValue)
+                .setOtherInfo(
+                        Constant.messages.getString(
+                                "ascanrules.sqlinjection.mssql.alert.timebased.extrainfo",
+                                attackValue,
+                                attackElapsedMillis,
+                                paramValue,
+                                originalElapsedMillis));
+    }
+
+    @Override
+    public List<Alert> getExampleAlerts() {
+        return List.of(
+                buildAlert(
+                                "https://example.com/?name=test",
+                                "name",
+                                "test",
+                                assembleTimingPayload(
+                                        SQL_MSSQL_TIME_REPLACEMENTS.get(4),
+                                        "test",
+                                        DEFAULT_SLEEP_TIME),
+                                TimeUnit.SECONDS.toMillis(DEFAULT_SLEEP_TIME),
+                                100L)
+                        .build());
     }
 
     private static String getSleepToken(int totalTimeInSeconds) {

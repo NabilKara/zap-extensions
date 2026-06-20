@@ -31,10 +31,15 @@ import org.apache.commons.httpclient.URIException;
 import org.parosproxy.paros.core.scanner.Alert;
 import org.parosproxy.paros.network.HttpMalformedHeaderException;
 import org.parosproxy.paros.network.HttpMessage;
+import org.zaproxy.addon.commonlib.CommonAlertTag;
 import org.zaproxy.addon.insights.internal.Insight;
 import org.zaproxy.addon.insights.report.ExtensionInsightsReport;
 import org.zaproxy.zap.extension.alert.AlertNode;
 import org.zaproxy.zap.extension.pscan.PluginPassiveScanner;
+import org.zaproxy.zap.extension.scripts.internal.db.ScriptRunRecorder;
+import org.zaproxy.zap.extension.scripts.internal.db.ScriptRunReportQuery;
+import org.zaproxy.zap.extension.scripts.report.ExtensionScriptsReport;
+import org.zaproxy.zap.extension.scripts.report.ScriptRunReportData;
 import org.zaproxy.zap.testutils.TestUtils;
 
 public class ReportTestUtils {
@@ -76,6 +81,31 @@ public class ReportTestUtils {
         AlertNode node = new AlertNode(risk, name);
         Alert alert1 = createAlertNode(name, desc, risk, confidence, "");
         Alert alert2 = createAlertNode(name, desc, risk, confidence, "Another ");
+        node.setUserObject(alert1);
+
+        AlertNode instance1 = new AlertNode(0, name);
+        instance1.setUserObject(alert1);
+
+        AlertNode instance2 = new AlertNode(0, name);
+        instance2.setUserObject(alert2);
+
+        node.add(instance1);
+        node.add(instance2);
+
+        return node;
+    }
+
+    static AlertNode getSystemicTaggedAlertNode(String name, String desc, int risk, int confidence)
+            throws URIException, HttpMalformedHeaderException {
+        AlertNode node = new AlertNode(risk, name);
+        Alert alert1 = createAlertNode(name, desc, risk, confidence, "");
+        Alert alert2 = createAlertNode(name, desc, risk, confidence, "Another ");
+
+        Map<String, String> systemicTags = new HashMap<>();
+        systemicTags.put(CommonAlertTag.SYSTEMIC.getTag(), CommonAlertTag.SYSTEMIC.getValue());
+        alert1.setTags(systemicTags);
+        alert2.setTags(systemicTags);
+
         node.setUserObject(alert1);
 
         AlertNode instance1 = new AlertNode(0, name);
@@ -184,7 +214,32 @@ public class ReportTestUtils {
         return extRep.generateReport(reportData, template, f.getAbsolutePath(), false);
     }
 
+    static File generateReportWithSystemicTaggedAlert(Template template, File f)
+            throws IOException, DocumentException, URIException, HttpMalformedHeaderException {
+        ExtensionReports extRep = new ExtensionReports();
+        ReportData reportData = new ReportData("test");
+        reportData.setTitle("Test Title");
+        reportData.setDescription("Test Description");
+        reportData.setIncludeAllConfidences(true);
+        reportData.setIncludeAllRisks(true);
+        reportData.setSections(template.getSections());
+
+        AlertNode root = new AlertNode(0, "Test");
+        root.add(
+                getSystemicTaggedAlertNode(
+                        "XSS", "XSS Description", Alert.RISK_HIGH, Alert.CONFIDENCE_MEDIUM));
+        reportData.setAlertTreeRootNode(root);
+        addSites(reportData);
+
+        return extRep.generateReport(reportData, template, f.getAbsolutePath(), false);
+    }
+
     static File generateReportWithInsights(Template template, File f)
+            throws IOException, DocumentException {
+        return generateReportWithInsights(template, f, null);
+    }
+
+    static File generateReportWithInsights(Template template, File f, Insight stoppingInsight)
             throws IOException, DocumentException {
         ExtensionReports extRep = new ExtensionReports();
         ReportData reportData = new ReportData("test");
@@ -224,8 +279,213 @@ public class ReportTestUtils {
                                 30,
                                 true));
         reportData.addReportObjects(ExtensionInsightsReport.INSIGHTS_LIST, insightList);
+        if (stoppingInsight != null) {
+            reportData.addReportObjects(ExtensionInsightsReport.STOPPING_INSIGHT, stoppingInsight);
+        }
 
         return extRep.generateReport(reportData, template, f.getAbsolutePath(), false);
+    }
+
+    static File generateReportWithScriptDiagnostics(Template template, File f)
+            throws IOException, DocumentException {
+        return generateReportWithScriptDiagnostics(template, f, true);
+    }
+
+    static File generateReportWithScriptDiagnostics(
+            Template template, File f, boolean includeScriptDiagnosticsSection)
+            throws IOException, DocumentException {
+        return generateReportWithScriptDiagnostics(
+                template, f, includeScriptDiagnosticsSection, defaultScriptDiagnosticRuns());
+    }
+
+    static File generateReportWithScriptDiagnostics(
+            Template template, File f, List<ScriptRunReportData.Run> runs)
+            throws IOException, DocumentException {
+        return generateReportWithScriptDiagnostics(template, f, true, runs);
+    }
+
+    static File generateReportWithScriptDiagnostics(
+            Template template,
+            File f,
+            boolean includeScriptDiagnosticsSection,
+            List<ScriptRunReportData.Run> runs)
+            throws IOException, DocumentException {
+        return generateReportWithScriptDiagnosticsInternal(
+                template, f, includeScriptDiagnosticsSection, runs, null);
+    }
+
+    static File generateReportWithScriptDiagnostics(
+            Template template,
+            File f,
+            boolean includeScriptDiagnosticsSection,
+            List<ScriptRunReportData.Run> runs,
+            String excludedSection)
+            throws IOException, DocumentException {
+        return generateReportWithScriptDiagnosticsInternal(
+                template, f, includeScriptDiagnosticsSection, runs, excludedSection);
+    }
+
+    private static File generateReportWithScriptDiagnosticsInternal(
+            Template template,
+            File f,
+            boolean includeScriptDiagnosticsSection,
+            List<ScriptRunReportData.Run> runs,
+            String excludedSection)
+            throws IOException, DocumentException {
+        ExtensionReports extRep = new ExtensionReports();
+        ReportData reportData = new ReportData("test");
+        reportData.setTitle("Test Title");
+        reportData.setDescription("Test Description");
+        reportData.setIncludeAllConfidences(true);
+        reportData.setIncludeAllRisks(true);
+        List<String> sections = new ArrayList<>(template.getSections());
+        if (!includeScriptDiagnosticsSection) {
+            sections.remove("scriptdiagnostics");
+        }
+        if (excludedSection != null) {
+            sections.remove(excludedSection);
+        }
+        reportData.setSections(sections);
+
+        AlertNode root = new AlertNode(0, "Test");
+        reportData.setAlertTreeRootNode(root);
+
+        reportData.addReportObjects(
+                ExtensionScriptsReport.SCRIPT_DIAGNOSTICS,
+                new ScriptRunReportData.Diagnostics(
+                        ScriptRunReportQuery.filterRunsForReport(
+                                runs,
+                                new ScriptRunReportQuery.Options(
+                                        sections.contains("scriptdiagnosticsscreenshots"),
+                                        sections.contains("scriptdiagnosticsoutput")))));
+
+        return extRep.generateReport(reportData, template, f.getAbsolutePath(), false);
+    }
+
+    static List<ScriptRunReportData.Run> defaultScriptDiagnosticRuns() {
+        return List.of(
+                scriptRunReport(
+                        "2026-04-01T12:00:00Z",
+                        1,
+                        "my-script",
+                        "standalone",
+                        -1,
+                        "",
+                        "Job: ... boom",
+                        "boom"),
+                scriptRunReport(
+                        "2026-04-02T08:30:00Z",
+                        ScriptRunRecorder.OUTCOME_FAILED,
+                        1,
+                        "chain-a",
+                        "standalone",
+                        13,
+                        "ZestClientElementClick",
+                        ScriptRunRecorder.OUTPUT_KIND_ERROR,
+                        "Job: ... step failed",
+                        "step failed",
+                        "abc64png"),
+                new ScriptRunReportData.Run(
+                        "2026-04-03T10:00:00Z",
+                        ScriptRunRecorder.OUTCOME_SUCCESS,
+                        "Job: script completed",
+                        List.of(
+                                new ScriptRunReportData.Script(
+                                        1,
+                                        "zest-script",
+                                        "standalone",
+                                        List.of(
+                                                new ScriptRunReportData.Step(
+                                                        3,
+                                                        "ZestActionPrint",
+                                                        List.of(
+                                                                new ScriptRunReportData.Output(
+                                                                        ScriptRunRecorder
+                                                                                .OUTPUT_KIND_OUTPUT,
+                                                                        "logged in"))))))));
+    }
+
+    static ScriptRunReportData.Run defaultScriptDiagnosticRunWithScreenshot() {
+        return defaultScriptDiagnosticRuns().get(1);
+    }
+
+    static ScriptRunReportData.Run defaultScriptDiagnosticRunWithStdoutAndError() {
+        return new ScriptRunReportData.Run(
+                "2026-04-03T10:00:00Z",
+                ScriptRunRecorder.OUTCOME_FAILED,
+                "Job: failed after log",
+                List.of(
+                        new ScriptRunReportData.Script(
+                                1,
+                                "zest-script",
+                                "standalone",
+                                List.of(
+                                        new ScriptRunReportData.Step(
+                                                3,
+                                                "ZestActionPrint",
+                                                List.of(
+                                                        new ScriptRunReportData.Output(
+                                                                ScriptRunRecorder
+                                                                        .OUTPUT_KIND_OUTPUT,
+                                                                "logged in"),
+                                                        new ScriptRunReportData.Output(
+                                                                ScriptRunRecorder.OUTPUT_KIND_ERROR,
+                                                                "boom")),
+                                                null)))));
+    }
+
+    static ScriptRunReportData.Run scriptRunReport(
+            String created,
+            int scriptOrder,
+            String scriptName,
+            String scriptType,
+            int sourceStepIndex,
+            String line,
+            String summaryMessage,
+            String outputDetailMessage) {
+        return scriptRunReport(
+                created,
+                ScriptRunRecorder.OUTCOME_FAILED,
+                scriptOrder,
+                scriptName,
+                scriptType,
+                sourceStepIndex,
+                line,
+                ScriptRunRecorder.OUTPUT_KIND_ERROR,
+                summaryMessage,
+                outputDetailMessage,
+                null);
+    }
+
+    static ScriptRunReportData.Run scriptRunReport(
+            String created,
+            String outcome,
+            int scriptOrder,
+            String scriptName,
+            String scriptType,
+            int sourceStepIndex,
+            String line,
+            String outputKind,
+            String summaryMessage,
+            String outputDetailMessage,
+            String screenshot) {
+        return new ScriptRunReportData.Run(
+                created,
+                outcome,
+                summaryMessage,
+                List.of(
+                        new ScriptRunReportData.Script(
+                                scriptOrder,
+                                scriptName,
+                                scriptType,
+                                List.of(
+                                        new ScriptRunReportData.Step(
+                                                sourceStepIndex,
+                                                line,
+                                                List.of(
+                                                        new ScriptRunReportData.Output(
+                                                                outputKind, outputDetailMessage)),
+                                                screenshot)))));
     }
 
     static Template getTemplateFromYamlFile(String templateName) throws Exception {

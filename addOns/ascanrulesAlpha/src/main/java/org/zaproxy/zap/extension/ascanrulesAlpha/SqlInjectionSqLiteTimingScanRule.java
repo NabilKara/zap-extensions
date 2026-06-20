@@ -22,6 +22,7 @@ package org.zaproxy.zap.extension.ascanrulesAlpha;
 import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -107,6 +108,8 @@ public class SqlInjectionSqLiteTimingScanRule extends AbstractAppParamPlugin
         Map<String, String> alertTags =
                 new HashMap<>(
                         CommonAlertTag.toMap(
+                                CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION,
+                                CommonAlertTag.OWASP_2025_A05_INJECTION,
                                 CommonAlertTag.OWASP_2021_A03_INJECTION,
                                 CommonAlertTag.OWASP_2017_A01_INJECTION,
                                 CommonAlertTag.WSTG_V42_INPV_05_SQLI,
@@ -299,8 +302,7 @@ public class SqlInjectionSqLiteTimingScanRule extends AbstractAppParamPlugin
                             SQL_SQLITE_TIME_REPLACEMENTS[timeBasedSQLindex].replace(
                                     "<<<<ORIGINALVALUE>>>>", originalParamValue);
                     newTimeBasedInjectionValue =
-                            newTimeBasedInjectionValue.replace(
-                                    "<<<<NUMBLOBBYTES>>>>", Long.toString(numBlobsToCreate));
+                            createPayload(newTimeBasedInjectionValue, numBlobsToCreate);
                     setParameter(msgDelay, paramName, newTimeBasedInjectionValue);
 
                     LOGGER.debug(
@@ -330,16 +332,12 @@ public class SqlInjectionSqLiteTimingScanRule extends AbstractAppParamPlugin
                                 errorMessagePattern.matcher(msgDelay.getResponseBody().toString());
                         boolean errorFound = matcher.find();
                         if (errorFound) {
-                            newAlert()
-                                    .setConfidence(Alert.CONFIDENCE_MEDIUM)
+                            buildErrorAlert(
+                                            newTimeBasedInjectionValue,
+                                            matcher.group(),
+                                            errorMessagePattern.toString())
                                     .setUri(getBaseMsg().getRequestHeader().getURI().toString())
                                     .setParam(paramName)
-                                    .setAttack(newTimeBasedInjectionValue)
-                                    .setOtherInfo(
-                                            Constant.messages.getString(
-                                                    "ascanalpha.sqlinjection.sqlite.alert.timing.error.extrainfo",
-                                                    errorMessagePattern))
-                                    .setEvidence(matcher.group())
                                     .setMessage(msgDelay)
                                     .raise();
 
@@ -467,20 +465,15 @@ public class SqlInjectionSqLiteTimingScanRule extends AbstractAppParamPlugin
                 LOGGER.debug("Number of sequential increases: {}", numberOfSequentialIncreases);
                 if (numberOfSequentialIncreases >= this.incrementalDelayIncreasesForAlert) {
 
-                    newAlert()
-                            .setConfidence(Alert.CONFIDENCE_MEDIUM)
+                    buildTimingAlert(
+                                    detectableDelayParameter,
+                                    detectableDelay,
+                                    maxDelayParameter,
+                                    maxDelay,
+                                    originalParamValue,
+                                    originalTimeUsed)
                             .setUri(getBaseMsg().getRequestHeader().getURI().toString())
                             .setParam(paramName)
-                            .setAttack(detectableDelayParameter)
-                            .setOtherInfo(
-                                    Constant.messages.getString(
-                                            "ascanalpha.sqlinjection.sqlite.alert.timing.extrainfo",
-                                            detectableDelayParameter,
-                                            detectableDelay,
-                                            maxDelayParameter,
-                                            maxDelay,
-                                            originalParamValue,
-                                            originalTimeUsed))
                             .setMessage(detectableDelayMessage)
                             .raise();
 
@@ -536,5 +529,62 @@ public class SqlInjectionSqLiteTimingScanRule extends AbstractAppParamPlugin
     @Override
     public Map<String, String> getAlertTags() {
         return ALERT_TAGS;
+    }
+
+    private AlertBuilder buildErrorAlert(String attack, String evidence, String errorPattern) {
+        return newAlert()
+                .setConfidence(Alert.CONFIDENCE_MEDIUM)
+                .setAttack(attack)
+                .setOtherInfo(
+                        Constant.messages.getString(
+                                "ascanalpha.sqlinjection.sqlite.alert.timing.error.extrainfo",
+                                errorPattern))
+                .setEvidence(evidence)
+                .setAlertRef(getId() + "-1");
+    }
+
+    private AlertBuilder buildTimingAlert(
+            String attack,
+            long detectableDelay,
+            String maxDelayParam,
+            long maxDelay,
+            String originalValue,
+            long originalTime) {
+        return newAlert()
+                .setConfidence(Alert.CONFIDENCE_MEDIUM)
+                .setAttack(attack)
+                .setOtherInfo(
+                        Constant.messages.getString(
+                                "ascanalpha.sqlinjection.sqlite.alert.timing.extrainfo",
+                                attack,
+                                detectableDelay,
+                                maxDelayParam,
+                                maxDelay,
+                                originalValue,
+                                originalTime))
+                .setAlertRef(getId() + "-2");
+    }
+
+    private static String createPayload(String value, long numBlobBytes) {
+        return value.replace("<<<<NUMBLOBBYTES>>>>", Long.toString(numBlobBytes));
+    }
+
+    @Override
+    public List<Alert> getExampleAlerts() {
+        String basePayload = SQL_SQLITE_TIME_REPLACEMENTS[0];
+        return List.of(
+                buildErrorAlert(
+                                createPayload(basePayload, minBlobBytes),
+                                ERROR_MESSAGE_PATTERNS[0].pattern(),
+                                ERROR_MESSAGE_PATTERNS[0].pattern())
+                        .build(),
+                buildTimingAlert(
+                                createPayload(basePayload, minBlobBytes),
+                                100,
+                                createPayload(basePayload, minBlobBytes * 10),
+                                200,
+                                "test",
+                                50)
+                        .build());
     }
 }

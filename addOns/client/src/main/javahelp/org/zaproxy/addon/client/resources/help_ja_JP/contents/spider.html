@@ -28,6 +28,8 @@ AJAXスパイダーと比較して、どれだけ効果的に機能するかに�
 <li>自動化フレームワークの<a href="automation.html">spiderClient</a>ジョブ
 </ul>
 
+The default spider options can be set via the <a href="spider-options.html">Spider Options</a> panel.
+
 <h3>クライアントスパイダーダイアログ</h3>
 
 クライアントスパイダーを開始するためのダイアログには、2つのサブタブがあります：
@@ -36,16 +38,13 @@ AJAXスパイダーと比較して、どれだけ効果的に機能するかに�
 
 このタブでは、スパイダーが探索を試みるものを定義できます。
 <p>
-スコープチェックは次のいずれかになります：
-
-<ul>
-	<li><code>Strict</code> - アクセスにはすべてのリクエストがスコープ内にある必要があることを強制します。
-	<li><code>Flexible</code> - すべてのリクエストにアクセスすることを許可します。 このスコープチェックには、スコープ外のドメインへのアクセスは許可されますが、クロールはされません。
-</ul>
+The Scope Check controls how the spider handles out-of-scope resources — see the <a href="spider-options.html">Spider Options</a> for details.
+<p>
 
 <h4>オプション</h4>
 
-このタブではスパイダーの動作を制御するオプションを定義できます。
+This tab allows you to override the default options that control how the spider works.
+See the <a href="spider-options.html">Spider Options</a> for a description of each option.
 
 <h3>クライアントスパイダータブ</h3>
 

@@ -50,8 +50,10 @@ import org.zaproxy.addon.dev.auth.simpleJsonCookie.SimpleJsonCookieDir;
 import org.zaproxy.addon.dev.auth.sso1.SSO1RootDir;
 import org.zaproxy.addon.dev.auth.sso2.SSO2RootDir;
 import org.zaproxy.addon.dev.auth.ssoMs.SSOMSRootDir;
+import org.zaproxy.addon.dev.auth.ssoMsPopup.SSOMSPopupRootDir;
 import org.zaproxy.addon.dev.auth.uuidLogin.UuidLoginRootDir;
 import org.zaproxy.addon.dev.csrf.basic.BasicCsrfDir;
+import org.zaproxy.addon.dev.full.basicVulnAuth.BasicVulnAuthDir;
 import org.zaproxy.addon.dev.seq.performance.PerformanceDir;
 import org.zaproxy.addon.network.ExtensionNetwork;
 import org.zaproxy.addon.network.server.HttpMessageHandler;
@@ -105,6 +107,7 @@ public class TestProxyServer {
         authDir.addDirectory(new SSO1RootDir(this, "sso1"));
         authDir.addDirectory(new SSO2RootDir(this, "sso2"));
         authDir.addDirectory(new SSOMSRootDir(this, "sso-ms"));
+        authDir.addDirectory(new SSOMSPopupRootDir(this, "sso-ms-popup"));
         authDir.addDirectory(new UuidLoginRootDir(this, "uuid-login"));
 
         TestDirectory apiDir = new TestDirectory(this, "api");
@@ -128,9 +131,13 @@ public class TestProxyServer {
         TestDirectory seqDir = new TestDirectory(this, "seq");
         seqDir.addDirectory(new PerformanceDir(this, "performance"));
 
+        TestDirectory fullDir = new TestDirectory(this, "full");
+        fullDir.addDirectory(new BasicVulnAuthDir(this, "basic-vuln-auth"));
+
         root.addDirectory(authDir);
         root.addDirectory(apiDir);
         root.addDirectory(csrfDir);
+        root.addDirectory(fullDir);
         root.addDirectory(htmlDir);
         root.addDirectory(seqDir);
     }

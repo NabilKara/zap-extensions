@@ -23,6 +23,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
@@ -53,12 +55,14 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.zaproxy.addon.automation.JobResultData;
+import org.zaproxy.addon.insights.internal.Insight;
 import org.zaproxy.zap.extension.alert.AlertNode;
 import org.zaproxy.zap.extension.sequence.StdActiveScanRunner.SequenceStepData;
 import org.zaproxy.zap.extension.sequence.automation.SequenceAScanJobResultData;
 import org.zaproxy.zap.extension.stats.ExtensionStats;
 import org.zaproxy.zap.extension.stats.InMemoryStats;
 import org.zaproxy.zap.testutils.TestUtils;
+import org.zaproxy.zap.utils.XmlUtils;
 import org.zaproxy.zap.utils.ZapXmlConfiguration;
 
 class ExtensionReportsXmlUnitTest extends TestUtils {
@@ -496,5 +500,57 @@ class ExtensionReportsXmlUnitTest extends TestUtils {
 
         assertThat(insightNode.getChildNodes().item(11).getNodeName(), is(equalTo("statistic")));
         assertThat(insightNode.getChildNodes().item(11).getTextContent(), is(equalTo(stat)));
+    }
+
+    @Test
+    void shouldRenderStoppingInsightInXmlReport() throws Exception {
+        // Given
+        Template template = ReportTestUtils.getTemplateFromYamlFile("traditional-xml");
+        File f = File.createTempFile("insights-stop-traditional-xml", template.getExtension());
+        DocumentBuilder db = XmlUtils.newXxeDisabledDocumentBuilderFactory().newDocumentBuilder();
+        Insight stopping =
+                new Insight(
+                        Insight.Level.HIGH,
+                        Insight.Reason.EXCEEDED_HIGH,
+                        "https://www.example.com",
+                        "insight.auth.failure",
+                        "Auth failure",
+                        75,
+                        true);
+
+        // When
+        File r = ReportTestUtils.generateReportWithInsights(template, f, stopping);
+        Document doc = db.parse(r);
+
+        // Then
+        NodeList stoppingNodes = doc.getElementsByTagName("stoppingInsight");
+        assertThat(stoppingNodes.getLength(), is(equalTo(1)));
+        NodeList children = stoppingNodes.item(0).getChildNodes();
+        Node keyNode = null;
+        for (int i = 0; i < children.getLength(); i++) {
+            if ("key".equals(children.item(i).getNodeName())) {
+                keyNode = children.item(i);
+                break;
+            }
+        }
+        assertThat(keyNode, is(not(nullValue())));
+        assertThat(keyNode.getTextContent(), is(equalTo("insight.auth.failure")));
+    }
+
+    @Test
+    void shouldNotMarkSystemicWhenInstancesBelowThresholdEvenWithSystemicTag() throws Exception {
+        // Given
+        Template template = ReportTestUtils.getTemplateFromYamlFile("traditional-xml");
+        File f = File.createTempFile("systemic-tag-xml", template.getExtension());
+        DocumentBuilder db = XmlUtils.newXxeDisabledDocumentBuilderFactory().newDocumentBuilder();
+
+        // When
+        File r = ReportTestUtils.generateReportWithSystemicTaggedAlert(template, f);
+        Document doc = db.parse(r);
+
+        // Then
+        NodeList systemicNodes = doc.getElementsByTagName("systemic");
+        assertThat(systemicNodes.getLength(), is(equalTo(1)));
+        assertThat(systemicNodes.item(0).getTextContent(), is(equalTo("false")));
     }
 }

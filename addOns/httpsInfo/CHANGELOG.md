@@ -4,7 +4,16 @@ All notable changes to this add-on will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
+### Fixed
+- Example alert code link.
 
+## [16] - 2026-03-31
+### Added
+- HTTPS Configuration alerts now have tags for OWASP Top 10, WSTG, systemic, and policies.
+
+## [15] - 2026-03-27
+### Changed
+- Update to DeepViolet 6.1.1, no longer requires Java 21+.
 
 ## [14] - 2026-03-19
 ### Added
@@ -73,6 +82,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+[16]: https://github.com/zaproxy/zap-extensions/releases/httpsInfo-v16
+[15]: https://github.com/zaproxy/zap-extensions/releases/httpsInfo-v15
 [14]: https://github.com/zaproxy/zap-extensions/releases/httpsInfo-v14
 [13]: https://github.com/zaproxy/zap-extensions/releases/httpsInfo-v13
 [12]: https://github.com/zaproxy/zap-extensions/releases/httpsInfo-v12

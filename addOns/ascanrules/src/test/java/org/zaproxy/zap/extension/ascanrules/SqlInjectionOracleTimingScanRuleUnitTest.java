@@ -28,6 +28,7 @@ import static org.hamcrest.Matchers.is;
 import fi.iki.elonen.NanoHTTPD.IHTTPSession;
 import fi.iki.elonen.NanoHTTPD.Response;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -59,6 +60,17 @@ class SqlInjectionOracleTimingScanRuleUnitTest
         boolean targets = rule.targets(techSet);
         // Then
         assertThat(targets, is(equalTo(true)));
+    }
+
+    @Test
+    void shouldHaveExpectedExampleAlert() {
+        // Given / When
+        List<Alert> alerts = rule.getExampleAlerts();
+        // Then
+        assertThat(alerts.size(), is(equalTo(1)));
+        Alert alert = alerts.get(0);
+        assertThat(alert.getRisk(), is(equalTo(Alert.RISK_HIGH)));
+        assertThat(alert.getConfidence(), is(equalTo(Alert.CONFIDENCE_MEDIUM)));
     }
 
     @Test
@@ -161,7 +173,10 @@ class SqlInjectionOracleTimingScanRuleUnitTest
         // Then
         assertThat(cwe, is(equalTo(89)));
         assertThat(wasc, is(equalTo(19)));
-        assertThat(tags.size(), is(equalTo(11)));
+        assertThat(tags.size(), is(equalTo(12)));
+        assertThat(
+                tags.containsKey(CommonAlertTag.OWASP_2025_A05_INJECTION.getTag()),
+                is(equalTo(true)));
         assertThat(
                 tags.containsKey(CommonAlertTag.OWASP_2021_A03_INJECTION.getTag()),
                 is(equalTo(true)));
@@ -178,6 +193,9 @@ class SqlInjectionOracleTimingScanRuleUnitTest
         assertThat(tags.containsKey(PolicyTag.QA_FULL.getTag()), is(equalTo(true)));
         assertThat(tags.containsKey(PolicyTag.SEQUENCE.getTag()), is(equalTo(true)));
         assertThat(tags.containsKey(PolicyTag.PENTEST.getTag()), is(equalTo(true)));
+        assertThat(
+                tags.get(CommonAlertTag.OWASP_2025_A05_INJECTION.getTag()),
+                is(equalTo(CommonAlertTag.OWASP_2025_A05_INJECTION.getValue())));
         assertThat(
                 tags.get(CommonAlertTag.OWASP_2021_A03_INJECTION.getTag()),
                 is(equalTo(CommonAlertTag.OWASP_2021_A03_INJECTION.getValue())));

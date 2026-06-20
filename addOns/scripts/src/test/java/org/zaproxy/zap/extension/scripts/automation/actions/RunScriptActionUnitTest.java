@@ -21,6 +21,7 @@ package org.zaproxy.zap.extension.scripts.automation.actions;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
@@ -29,15 +30,22 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Optional;
+import javax.jdo.PersistenceManager;
+import javax.jdo.PersistenceManagerFactory;
+import javax.jdo.Transaction;
 import org.apache.commons.httpclient.URI;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 import org.parosproxy.paros.Constant;
 import org.parosproxy.paros.control.Control;
 import org.parosproxy.paros.extension.ExtensionAdaptor;
@@ -56,6 +64,12 @@ import org.zaproxy.zap.extension.script.ScriptType;
 import org.zaproxy.zap.extension.script.ScriptWrapper;
 import org.zaproxy.zap.extension.scripts.ExtensionScriptsUI;
 import org.zaproxy.zap.extension.scripts.automation.ScriptJobParameters;
+import org.zaproxy.zap.extension.scripts.automation.diagnostics.ScriptRunRecordBuilder.RunFailure;
+import org.zaproxy.zap.extension.scripts.diagnostics.ScriptDiagnosticSource;
+import org.zaproxy.zap.extension.scripts.diagnostics.ScriptDiagnosticSource.RunDiagnostics;
+import org.zaproxy.zap.extension.scripts.diagnostics.ScriptDiagnosticSource.RunFailureDiagnostic;
+import org.zaproxy.zap.extension.scripts.internal.db.ScriptsRun;
+import org.zaproxy.zap.extension.scripts.internal.db.TableJdo;
 import org.zaproxy.zap.testutils.TestUtils;
 
 /** Unit test for {@link RunScriptAction}. */
@@ -81,13 +95,12 @@ class RunScriptActionUnitTest extends TestUtils {
         return Constant.messages.getString(key, args);
     }
 
-    private static final ScriptWrapper MERGED_CHAIN_SCRIPT =
-            createMockZestWrapper("merged-chain-script");
+    private static final ScriptWrapper CHAIN_SCRIPT = createMockZestWrapper("chain-script");
     private static List<ScriptWrapper> capturedChainScripts;
     private static String capturedChainRunName;
     private static int getChainScriptCalls;
 
-    /** Stub for chain tests (no Zest): returns merged chain script wrapper. */
+    /** Stub for chain tests (no Zest): returns chain script wrapper. */
     private static final ExtensionAdaptor ZEST_CHAIN_SCRIPT_STUB =
             new ExtensionAdaptor("ExtensionZest") {
                 @SuppressWarnings("unused")
@@ -95,7 +108,7 @@ class RunScriptActionUnitTest extends TestUtils {
                     capturedChainScripts = scripts;
                     capturedChainRunName = runName;
                     getChainScriptCalls++;
-                    return scripts.isEmpty() ? null : MERGED_CHAIN_SCRIPT;
+                    return scripts.isEmpty() ? null : CHAIN_SCRIPT;
                 }
             };
 
@@ -129,6 +142,24 @@ class RunScriptActionUnitTest extends TestUtils {
                         "",
                         null);
         action = new RunScriptAction(parameters);
+    }
+
+    @Test
+    void shouldSummarizeSingleRunWithScriptName() {
+        parameters.setName("my-script");
+
+        assertThat(
+                action.getSummary(),
+                is(equalTo(msg("scripts.automation.dialog.summary.run", "my-script"))));
+    }
+
+    @Test
+    void shouldSummarizeChainWithCommaSeparatedScriptNames() {
+        parameters.setChain(List.of("a", "b", "c"));
+
+        assertThat(
+                action.getSummary(),
+                is(equalTo(msg("scripts.automation.dialog.summary.run", "a, b, c"))));
     }
 
     /** Zest standalone script wrapper for run-action tests. */
@@ -274,7 +305,7 @@ class RunScriptActionUnitTest extends TestUtils {
         assertThat(getChainScriptCalls, is(equalTo(1)));
         assertThat(capturedChainScripts, contains(script1, script2));
         assertThat(capturedChainRunName, is(equalTo("chain_script1")));
-        verify(extScript, times(1)).invokeScript(MERGED_CHAIN_SCRIPT);
+        verify(extScript, times(1)).invokeScript(CHAIN_SCRIPT);
     }
 
     @Test
@@ -298,11 +329,11 @@ class RunScriptActionUnitTest extends TestUtils {
         assertThat(getChainScriptCalls, is(equalTo(1)));
         assertThat(capturedChainScripts, contains(script1, script2, script3));
         assertThat(capturedChainRunName, is(equalTo("chain_script1")));
-        verify(extScript, times(1)).invokeScript(MERGED_CHAIN_SCRIPT);
+        verify(extScript, times(1)).invokeScript(CHAIN_SCRIPT);
     }
 
     @Test
-    void shouldReportErrorWhenMergedChainExecutionFails() throws Exception {
+    void shouldReportErrorWhenChainExecutionFails() throws Exception {
         // Given
         ScriptWrapper script1 = createMockZestWrapper("script1");
         ScriptWrapper script2 = createMockZestWrapper("script2");
@@ -310,8 +341,7 @@ class RunScriptActionUnitTest extends TestUtils {
         given(extScript.getScript("script1")).willReturn(script1);
         given(extScript.getScript("script2")).willReturn(script2);
         given(extScript.getScript("script3")).willReturn(script3);
-        when(extScript.invokeScript(MERGED_CHAIN_SCRIPT))
-                .thenThrow(new RuntimeException("Script failed"));
+        when(extScript.invokeScript(CHAIN_SCRIPT)).thenThrow(new RuntimeException("Script failed"));
 
         parameters.setChain(List.of("script1", "script2", "script3"));
 
@@ -326,11 +356,57 @@ class RunScriptActionUnitTest extends TestUtils {
                         msg(
                                 "scripts.automation.error.chainExecutionFailed",
                                 JOB_NAME,
+                                "script1 -> script2 -> script3",
                                 "Script failed")));
         assertThat(getChainScriptCalls, is(equalTo(1)));
         assertThat(capturedChainScripts, contains(script1, script2, script3));
         assertThat(capturedChainRunName, is(equalTo("chain_script1")));
-        verify(extScript, times(1)).invokeScript(MERGED_CHAIN_SCRIPT);
+        verify(extScript, times(1)).invokeScript(CHAIN_SCRIPT);
+    }
+
+    @Test
+    void shouldReportChainExecutionErrorUsingZestContextWithoutDuplicatingExceptionMessage()
+            throws Exception {
+        ScriptWrapper script1 = createMockZestWrapper("script1");
+        ScriptWrapper script2 = createMockZestWrapper("script2");
+        given(extScript.getScript("script1")).willReturn(script1);
+        given(extScript.getScript("script2")).willReturn(script2);
+
+        String zestLine =
+                "Chain, source script \"nav\", source step index 16, line ZestClientElementClick - element missing";
+        ScriptWrapper chain = new ScriptWrapperWithZestDiagnostic("chain-script", zestLine);
+
+        ExtensionAdaptor zestExt =
+                new ExtensionAdaptor("ExtensionZest") {
+                    @SuppressWarnings("unused")
+                    public ScriptWrapper getChainScript(
+                            List<ScriptWrapper> scripts, String runName) {
+                        capturedChainScripts = scripts;
+                        capturedChainRunName = runName;
+                        getChainScriptCalls++;
+                        return scripts.isEmpty() ? null : chain;
+                    }
+                };
+        given(extensionLoader.getExtension("ExtensionZest")).willReturn(zestExt);
+
+        when(extScript.invokeScript(chain))
+                .thenThrow(new RuntimeException("Very long root cause repeated everywhere"));
+
+        parameters.setChain(List.of("script1", "script2"));
+
+        action.runJob(JOB_NAME, env, progress);
+
+        assertThat(progress.getErrors(), hasSize(1));
+        assertThat(
+                progress.getErrors(),
+                contains(
+                        msg(
+                                "scripts.automation.error.chainExecutionFailed",
+                                JOB_NAME,
+                                "script1 -> script2",
+                                zestLine)));
+        assertThat(getChainScriptCalls, is(equalTo(1)));
+        verify(extScript, times(1)).invokeScript(chain);
     }
 
     @Test
@@ -351,7 +427,7 @@ class RunScriptActionUnitTest extends TestUtils {
         assertThat(getChainScriptCalls, is(equalTo(1)));
         assertThat(capturedChainScripts, contains(script1));
         assertThat(capturedChainRunName, is(equalTo("chain_script1")));
-        verify(extScript, times(1)).invokeScript(MERGED_CHAIN_SCRIPT);
+        verify(extScript, times(1)).invokeScript(CHAIN_SCRIPT);
         verify(extensionLoader, times(1)).getExtension("ExtensionZest");
     }
 
@@ -559,5 +635,161 @@ class RunScriptActionUnitTest extends TestUtils {
                 contains(msg("scripts.automation.error.scriptTypeIsNull", JOB_NAME)));
         assertThat(issues, hasSize(1));
         assertThat(issues, hasItem(msg("scripts.automation.error.scriptTypeIsNull", JOB_NAME)));
+    }
+
+    @Test
+    void shouldResolveFailureUsingZestContextAndDetailWhenPresent() {
+        ScriptWrapper script =
+                new ScriptWrapperWithZestDiagnostic(
+                        "fake-zest",
+                        new RunFailureDiagnostic(
+                                "zest context",
+                                "compact detail",
+                                2,
+                                13,
+                                "ZestClientClick",
+                                "shot"));
+        RunFailure failure =
+                RunScriptAction.resolveRunFailure(script, new RuntimeException("ignored"));
+
+        assertThat(failure.progressDetail(), is("zest context"));
+        assertThat(failure.outputDetail(), is("compact detail"));
+        assertThat(failure.failingScriptOrder(), is(2));
+        assertThat(failure.failureStep().sourceStepIndex(), is(13));
+        assertThat(failure.failureStep().line(), is("ZestClientClick"));
+        assertThat(failure.failureStep().screenshotBase64(), is("shot"));
+    }
+
+    @Test
+    void shouldResolveFailureUsingExceptionWhenNoDiagnostic() {
+        ScriptWrapper script = new ScriptWrapper();
+        script.setName("plain");
+        Exception ex = new IllegalStateException("job failed");
+
+        RunFailure failure = RunScriptAction.resolveRunFailure(script, ex);
+
+        assertThat(failure.progressDetail(), is("job failed"));
+        assertThat(failure.outputDetail(), is("job failed"));
+        assertThat(failure.failingScriptOrder(), is(-1));
+        assertThat(failure.failureStep().sourceStepIndex(), is(-1));
+        assertThat(failure.failureStep().line(), is(""));
+    }
+
+    @Test
+    void shouldResolveFailureUsingExceptionClassWhenMessageNull() {
+        ScriptWrapper script = new ScriptWrapper();
+        Exception ex = new IllegalStateException();
+
+        RunFailure failure = RunScriptAction.resolveRunFailure(script, ex);
+
+        assertThat(failure.progressDetail(), is(IllegalStateException.class.getName()));
+        assertThat(failure.outputDetail(), is(IllegalStateException.class.getName()));
+    }
+
+    @Test
+    void shouldResolveFailureOutputDetailFromExceptionWhenZestDetailBlank() {
+        ScriptWrapper script =
+                new ScriptWrapperWithZestDiagnostic(
+                        "fake-zest", new RunFailureDiagnostic("ctx", "  ", 1, 5, "Line", null));
+        Exception ex = new RuntimeException("persist me");
+
+        RunFailure failure = RunScriptAction.resolveRunFailure(script, ex);
+
+        assertThat(failure.progressDetail(), is("ctx"));
+        assertThat(failure.outputDetail(), is("persist me"));
+    }
+
+    @Test
+    void shouldNotPersistWhenSingleScriptNotFoundAtRunTime() {
+        try (MockedStatic<TableJdo> tableJdo = mockStatic(TableJdo.class)) {
+            PersistenceManagerFactory pmf = mock(PersistenceManagerFactory.class);
+            tableJdo.when(TableJdo::getPmf).thenReturn(pmf);
+
+            given(extScript.getScript("nonExistent")).willReturn(null);
+            parameters.setName("nonExistent");
+
+            action.runJob(JOB_NAME, env, progress);
+
+            assertThat(progress.getErrors(), hasSize(1));
+            tableJdo.verify(TableJdo::getPmf, times(0));
+        }
+    }
+
+    @Test
+    void shouldPersistShortSummaryWhileProgressLogsFullFailureWhenChainExecutionFails()
+            throws Exception {
+        try (MockedStatic<TableJdo> tableJdo = mockStatic(TableJdo.class)) {
+            // Given
+            PersistenceManagerFactory pmf = mock(PersistenceManagerFactory.class);
+            PersistenceManager pm = mock(PersistenceManager.class);
+            Transaction tx = mock(Transaction.class);
+            tableJdo.when(TableJdo::getPmf).thenReturn(pmf);
+            given(pmf.getPersistenceManager()).willReturn(pm);
+            given(pm.currentTransaction()).willReturn(tx);
+            given(tx.isActive()).willReturn(false);
+
+            ScriptWrapper script1 = createMockZestWrapper("script1");
+            ScriptWrapper script2 = createMockZestWrapper("script2");
+            ScriptWrapper script3 = createMockZestWrapper("script3");
+            given(extScript.getScript("script1")).willReturn(script1);
+            given(extScript.getScript("script2")).willReturn(script2);
+            given(extScript.getScript("script3")).willReturn(script3);
+            when(extScript.invokeScript(CHAIN_SCRIPT))
+                    .thenThrow(new RuntimeException("Script failed"));
+            parameters.setChain(List.of("script1", "script2", "script3"));
+
+            // When
+            action.runJob(JOB_NAME, env, progress);
+
+            // Then
+            assertThat(progress.getErrors(), hasSize(1));
+            assertThat(progress.getErrors().get(0), containsString("Script failed"));
+            @SuppressWarnings("rawtypes")
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(pm, times(1)).makePersistent(captor.capture());
+            ScriptsRun run =
+                    captor.getAllValues().stream()
+                            .filter(ScriptsRun.class::isInstance)
+                            .map(ScriptsRun.class::cast)
+                            .findFirst()
+                            .orElseThrow();
+            assertThat(
+                    run.getSummary(),
+                    is(
+                            equalTo(
+                                    msg(
+                                            "scripts.automation.persist.failedSummary.chain",
+                                            JOB_NAME,
+                                            "script1 -> script2 -> script3"))));
+            assertThat(run.getScripts(), hasSize(3));
+            assertThat(run.getScripts().get(0).getSteps(), hasSize(1));
+            assertThat(run.getScripts().get(0).getSteps().get(0).getOutputs(), hasSize(1));
+        }
+    }
+
+    private static final class ScriptWrapperWithZestDiagnostic extends ScriptWrapper
+            implements ScriptDiagnosticSource {
+
+        private final Optional<RunFailureDiagnostic> diagnostic;
+
+        ScriptWrapperWithZestDiagnostic(String name, RunFailureDiagnostic diagnostic) {
+            setName(name);
+            setEngineName(ZEST_ENGINE_NAME);
+            setType(new ScriptType(ExtensionScript.TYPE_STANDALONE, null, null, false));
+            this.diagnostic = Optional.of(diagnostic);
+        }
+
+        ScriptWrapperWithZestDiagnostic(String name, String zestFailureContext) {
+            this(name, new RunFailureDiagnostic(zestFailureContext, "", -1, -1, "", null));
+        }
+
+        @Override
+        public RunDiagnostics getRunDiagnostics() {
+            return new RunDiagnostics(diagnostic, List.of());
+        }
+
+        /** No-op for test stub. */
+        @Override
+        public void clearRunDiagnostics() {}
     }
 }
