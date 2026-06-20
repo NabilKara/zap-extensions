@@ -4,8 +4,20 @@ All notable changes to this add-on will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
+### Changed
+- Adjust columns in plan display after loading a plan.
+
+### Removed
+- The Params automation support was moved into the Params add-on (Issue 9210).
+
+## [0.60.0] - 2026-05-08
+### Fixed
+- Fix exception during forced shutdown in the Active Scan job.
+
+## [0.59.0] - 2026-04-02
 ### Added
 - Allow to load a plan from the contents of the clipboard.
+- Access to the progress of long running jobs
 
 ### Changed
 - Move the Automation panel to the workspace window.
@@ -589,6 +601,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - First version.
 
+[0.60.0]: https://github.com/zaproxy/zap-extensions/releases/automation-v0.60.0
+[0.59.0]: https://github.com/zaproxy/zap-extensions/releases/automation-v0.59.0
 [0.58.0]: https://github.com/zaproxy/zap-extensions/releases/automation-v0.58.0
 [0.57.0]: https://github.com/zaproxy/zap-extensions/releases/automation-v0.57.0
 [0.56.0]: https://github.com/zaproxy/zap-extensions/releases/automation-v0.56.0

@@ -35,10 +35,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.withSettings;
 
-import java.io.IOException;
 import java.net.MalformedURLException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,7 +47,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentMatcher;
@@ -75,6 +71,7 @@ import org.zaproxy.addon.automation.AutomationEnvironment;
 import org.zaproxy.addon.automation.AutomationJob.Order;
 import org.zaproxy.addon.automation.AutomationProgress;
 import org.zaproxy.addon.automation.ContextWrapper;
+import org.zaproxy.addon.automation.ExtensionAutomation;
 import org.zaproxy.zap.extension.ascan.ActiveScan;
 import org.zaproxy.zap.extension.ascan.ExtensionActiveScan;
 import org.zaproxy.zap.extension.ascan.PolicyManager;
@@ -91,14 +88,9 @@ class ActiveScanJobUnitTest {
     private ExtensionActiveScan extAScan;
     private static AbstractPlugin plugin;
 
-    @TempDir static Path tempDir;
-
     @BeforeAll
-    static void init() throws IOException {
+    static void init() {
         mockedCmdLine = Mockito.mockStatic(CommandLine.class);
-
-        Constant.setZapHome(
-                Files.createDirectory(tempDir.resolve("home")).toAbsolutePath().toString());
 
         PluginFactoryTestHelper.init();
         plugin = new PluginTestHelper();
@@ -128,6 +120,9 @@ class ActiveScanJobUnitTest {
         policyManager = mock();
         given(extAScan.getPolicyManager()).willReturn(policyManager);
 
+        ExtensionAutomation extAutomation = mock(ExtensionAutomation.class);
+        given(extensionLoader.getExtension(ExtensionAutomation.class)).willReturn(extAutomation);
+
         Control.initSingletonForTesting(Model.getSingleton(), extensionLoader);
         Model.getSingleton().getOptionsParam().load(new ZapXmlConfiguration());
     }
@@ -145,6 +140,8 @@ class ActiveScanJobUnitTest {
         assertThat(job.getOrder(), is(equalTo(Order.ATTACK)));
         assertThat(job.getParamMethodObject(), is(extAScan));
         assertThat(job.getParamMethodName(), is("getScannerParam"));
+        assertThat(job.getLongRunningJobId(), is(equalTo(null)));
+        assertThat(job.getLongRunningJobProgress(), is(equalTo(0)));
     }
 
     @Test
@@ -409,6 +406,8 @@ class ActiveScanJobUnitTest {
 
         assertThat(progress.hasWarnings(), is(equalTo(false)));
         assertThat(progress.hasErrors(), is(equalTo(false)));
+
+        verify(extAScan).getScan(1);
     }
 
     @Test

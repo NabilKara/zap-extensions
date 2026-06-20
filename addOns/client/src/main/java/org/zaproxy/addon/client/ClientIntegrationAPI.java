@@ -27,26 +27,22 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import net.sf.json.JSONObject;
 import org.apache.commons.lang3.Validate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.openqa.selenium.WebDriver;
 import org.parosproxy.paros.network.HttpHeader;
 import org.parosproxy.paros.network.HttpMessage;
 import org.parosproxy.paros.network.HttpRequestHeader;
-import org.zaproxy.addon.client.internal.ClientNode;
-import org.zaproxy.addon.client.internal.ClientSideComponent;
-import org.zaproxy.addon.client.internal.ReportedElement;
-import org.zaproxy.addon.client.internal.ReportedEvent;
+import org.zaproxy.addon.client.internal.ClientMap;
 import org.zaproxy.zap.extension.api.API;
 import org.zaproxy.zap.extension.api.ApiAction;
 import org.zaproxy.zap.extension.api.ApiException;
 import org.zaproxy.zap.extension.api.ApiImplementor;
 import org.zaproxy.zap.extension.api.ApiResponse;
 import org.zaproxy.zap.extension.api.ApiResponseElement;
-import org.zaproxy.zap.extension.selenium.SeleniumScriptUtils;
 
 public class ClientIntegrationAPI extends ApiImplementor {
     private static final String PREFIX = "client";
@@ -66,14 +62,21 @@ public class ClientIntegrationAPI extends ApiImplementor {
     private static final Logger LOGGER = LogManager.getLogger(ClientIntegrationAPI.class);
 
     private ExtensionClientIntegration extension;
+    private ClientMap clientMap;
 
     private String callbackUrl;
 
     private Map<String, ClientCallBackImplementor> clientCallBacks =
             Collections.synchronizedMap(new HashMap<>());
 
-    public ClientIntegrationAPI(ExtensionClientIntegration extension) {
+    private Map<WebDriver, ClientCallBackUtils> wdMap =
+            Collections.synchronizedMap(new HashMap<>());
+
+    private Map<Integer, Integer> portInitiators = Collections.synchronizedMap(new HashMap<>());
+
+    public ClientIntegrationAPI(ExtensionClientIntegration extension, ClientMap clientMap) {
         this.extension = extension;
+        this.clientMap = clientMap;
 
         this.addApiAction(new ApiAction(ACTION_REPORT_OBJECT, new String[] {PARAM_OBJECT_JSON}));
         this.addApiAction(new ApiAction(ACTION_REPORT_EVENT, new String[] {PARAM_EVENT_JSON}));
@@ -84,6 +87,8 @@ public class ClientIntegrationAPI extends ApiImplementor {
 
         this.addApiAction(
                 new ApiAction(ACTION_EXPORT_CLIENT_MAP, new String[] {PARAM_EXPORT_PATH}));
+
+        addApiOptions(extension.getClientParam());
 
         callbackUrl =
                 API.getInstance().getCallBackUrl(this, HttpHeader.SCHEME_HTTPS + API.API_DOMAIN);
@@ -99,57 +104,15 @@ public class ClientIntegrationAPI extends ApiImplementor {
         return callbackUrl;
     }
 
-    private void handleReportObject(String jsonStr) {
-        LOGGER.debug("Got object: {}", jsonStr);
-        JSONObject json = JSONObject.fromObject(jsonStr);
-        ReportedElement rnode = new ReportedElement(json);
-        if (!"A".equals(rnode.getNodeName())) {
-            // Dont add links - they flood the table
-            this.extension.addReportedObject(rnode);
-        }
-        Object url = json.get("url");
-        if (url instanceof String) {
-            String urlStr = (String) url;
-            if (!ExtensionClientIntegration.isApiUrl(urlStr)) {
-                ClientNode node = this.extension.getOrAddClientNode(urlStr, false, false);
-                ClientSideComponent component = new ClientSideComponent(json);
-                extension.addComponentToNode(node, component);
-                if (component.isStorageEvent()) {
-                    String storageUrl = node.getSite() + component.getTypeForDisplay();
-                    extension.addComponentToNode(
-                            this.extension.getOrAddClientNode(storageUrl, false, true), component);
-                }
-            }
-        } else {
-            LOGGER.debug("Not got url:(: {}", url);
-        }
-        Object href = json.get("href");
-        if (href instanceof String && ((String) href).toLowerCase(Locale.ROOT).startsWith("http")) {
-            extension.getOrAddClientNode((String) href, false, false);
-        }
-    }
-
-    private void handleReportEvent(String jsonStr) {
-        LOGGER.debug("Got event: {}", jsonStr);
-        JSONObject json = JSONObject.fromObject(jsonStr);
-        ReportedEvent event = new ReportedEvent(json);
-        if (event.getUrl() == null || !ExtensionClientIntegration.isApiUrl(event.getUrl())) {
-            this.extension.addReportedObject(event);
-            if (event.getUrl() != null) {
-                extension.setVisited(event.getUrl());
-            }
-        }
-    }
-
     @Override
     public ApiResponse handleApiAction(String name, JSONObject params) throws ApiException {
         try {
             switch (name) {
                 case ACTION_REPORT_OBJECT ->
-                        handleReportObject(this.getParam(params, PARAM_OBJECT_JSON, ""));
+                        clientMap.handleReportObject(this.getParam(params, PARAM_OBJECT_JSON, ""));
 
                 case ACTION_REPORT_EVENT ->
-                        handleReportEvent(this.getParam(params, PARAM_EVENT_JSON, ""));
+                        clientMap.handleReportEvent(this.getParam(params, PARAM_EVENT_JSON, ""));
 
                 case ACTION_REPORT_ZEST_STATEMENT ->
                         this.extension.addZestStatement(
@@ -168,7 +131,9 @@ public class ClientIntegrationAPI extends ApiImplementor {
                                 "Failed to export client map: " + exportPath);
                     }
                 }
-                default -> throw new ApiException(ApiException.Type.BAD_ACTION);
+                default -> {
+                    throw new ApiException(ApiException.Type.BAD_ACTION);
+                }
             }
         } catch (ApiException e) {
             throw e;
@@ -200,7 +165,11 @@ public class ClientIntegrationAPI extends ApiImplementor {
             ClientCallBackImplementor impl = this.clientCallBacks.get(paths[3]);
             if (impl != null) {
                 try {
-                    return impl.handleCallBack(msg);
+                    int initiator =
+                            portInitiators.getOrDefault(
+                                    msg.getRequestHeader().getLocalAddress().getPort(), -1);
+                    return impl.handleCallBack(
+                            msg, new ClientCallBackImplementor.ClientCallBackContext(initiator));
                 } catch (Exception e) {
                     LOGGER.error(
                             "Error in client callback implementation {}: {}",
@@ -217,10 +186,11 @@ public class ClientIntegrationAPI extends ApiImplementor {
         if (HttpRequestHeader.POST.equals(msg.getRequestHeader().getMethod())) {
             String body = msg.getRequestBody().toString();
 
+            int source = msg.getRequestHeader().getLocalAddress().getPort();
             if (body.startsWith(PARAM_OBJECT_JSON + "=")) {
-                handleReportObject(decodeParamString(body, PARAM_OBJECT_JSON));
+                clientMap.handleReportObject(decodeParamString(body, PARAM_OBJECT_JSON), source);
             } else if (body.startsWith(PARAM_EVENT_JSON)) {
-                handleReportEvent(decodeParamString(body, PARAM_EVENT_JSON));
+                clientMap.handleReportEvent(decodeParamString(body, PARAM_EVENT_JSON), source);
             } else if (body.startsWith(PARAM_STATEMENT_JSON)) {
                 try {
                     this.extension.addZestStatement(decodeParamString(body, PARAM_STATEMENT_JSON));
@@ -293,14 +263,44 @@ public class ClientIntegrationAPI extends ApiImplementor {
         this.clientCallBacks.remove(callback.getImplementorName());
     }
 
-    protected void browserLaunched(SeleniumScriptUtils ssutils) {
+    void registerPortInitiator(int port, int initiator) {
+        portInitiators.put(port, initiator);
+    }
+
+    void unregisterPortInitiator(int port) {
+        portInitiators.remove(port);
+    }
+
+    protected void browserLaunched(ClientCallBackUtils ccbu) {
+        wdMap.put(ccbu.getWebDriver(), ccbu);
+        registerPortInitiator(ccbu.getProxyPort(), ccbu.getRequester());
         this.clientCallBacks.forEach(
                 (n, callback) -> {
                     try {
-                        callback.browserLaunched(ssutils);
+                        callback.browserLaunched(ccbu);
                     } catch (Exception e) {
                         LOGGER.error(e.getMessage(), e);
                     }
                 });
+    }
+
+    void browserClosing(WebDriver wd) {
+        if (!wdMap.containsKey(wd)) {
+            return;
+        }
+        ClientCallBackUtils ccbu = wdMap.remove(wd);
+        this.clientCallBacks.forEach(
+                (n, callback) -> {
+                    try {
+                        callback.browserClosing(ccbu);
+                    } catch (Exception e) {
+                        LOGGER.error(e.getMessage(), e);
+                    }
+                });
+    }
+
+    void clear() {
+        this.wdMap.clear();
+        this.portInitiators.clear();
     }
 }

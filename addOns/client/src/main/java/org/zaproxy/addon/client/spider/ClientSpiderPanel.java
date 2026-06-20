@@ -21,6 +21,7 @@ package org.zaproxy.addon.client.spider;
 
 import java.awt.BorderLayout;
 import java.awt.EventQueue;
+import java.awt.event.ActionListener;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -35,7 +36,6 @@ import org.jdesktop.swingx.JXTable;
 import org.parosproxy.paros.Constant;
 import org.parosproxy.paros.model.SiteNode;
 import org.parosproxy.paros.view.View;
-import org.zaproxy.addon.client.ClientOptions;
 import org.zaproxy.addon.client.ExtensionClientIntegration;
 import org.zaproxy.zap.model.ScanController;
 import org.zaproxy.zap.model.ScanListenner2;
@@ -67,6 +67,7 @@ public class ClientSpiderPanel extends ScanPanel2<ClientSpider, ScanController<C
     private JPanel mainPanel;
     private JTabbedPane tabbedPane;
     private JButton scanButton;
+    private JButton stopButton;
     private ZapTable addedNodesTable;
     private JScrollPane addedNodesTableScrollPane;
     private JLabel addedCountNameLabel;
@@ -77,12 +78,12 @@ public class ClientSpiderPanel extends ScanPanel2<ClientSpider, ScanController<C
     private JScrollPane tasksTableScrollPane;
 
     private ExtensionClientIntegration extension;
-    private ClientOptions clientOptions;
+    private ClientSpiderOptions clientOptions;
 
     public ClientSpiderPanel(
             ExtensionClientIntegration extension,
             SpiderScanController controller,
-            ClientOptions clientOptions) {
+            ClientSpiderOptions clientOptions) {
         super("client.spider", ExtensionClientIntegration.getIcon(), controller);
         this.extension = extension;
         this.clientOptions = clientOptions;
@@ -238,6 +239,24 @@ public class ClientSpiderPanel extends ScanPanel2<ClientSpider, ScanController<C
             messagesTable.setModel(EMPTY_MESSAGES_TABLE_MODEL);
         }
         this.updateAddedCount();
+    }
+
+    @Override
+    protected JButton getStopScanButton() {
+        if (stopButton == null) {
+            stopButton = super.getStopScanButton();
+            for (ActionListener al : stopButton.getActionListeners()) {
+                stopButton.removeActionListener(al);
+            }
+            stopButton.addActionListener(
+                    e -> {
+                        ClientSpider scanner = getSelectedScanner();
+                        if (scanner != null) {
+                            new Thread(scanner::stopScan, "ZAP-ClientSpider-GUI-Stop").start();
+                        }
+                    });
+        }
+        return stopButton;
     }
 
     @Override

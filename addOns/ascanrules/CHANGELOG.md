@@ -5,7 +5,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
 ### Changed
+- Updated a reference link for the XSLT Injection scan rule.
+
+## [82] - 2026-05-06
+### Changed
+- The following scan rules now include example alert functionality for documentation generation purposes (Issue 6119):
+    - SQL Injection - Hypersonic SQL (Time Based)
+    - SQL Injection - MsSQL (Time Based)
+    - SQL Injection - MySQL (Time Based)
+    - SQL Injection - Oracle (Time Based)
+    - SQL Injection - PostgreSQL (Time Based)
+    - Cross Site Scripting (Persistent) (Also now includes alert references (Issue 7100))
+
+## [81] - 2026-04-14
+### Changed
 - Maintenance changes.
+- The scan rules now have new tags for the OWASP Top 10 2025, and API Top 10 2023.
+- Depends on an updated version of the Common Library add-on.
 
 ## [80] - 2026-03-02
 ### Added
@@ -679,6 +695,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+[82]: https://github.com/zaproxy/zap-extensions/releases/ascanrules-v82
+[81]: https://github.com/zaproxy/zap-extensions/releases/ascanrules-v81
 [80]: https://github.com/zaproxy/zap-extensions/releases/ascanrules-v80
 [79]: https://github.com/zaproxy/zap-extensions/releases/ascanrules-v79
 [78]: https://github.com/zaproxy/zap-extensions/releases/ascanrules-v78

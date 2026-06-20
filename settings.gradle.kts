@@ -11,6 +11,7 @@ rootProject.name = "zap-extensions"
 val addOnsProjectName = "addOns"
 include(addOnsProjectName)
 include("testutils")
+include("testutilscore")
 
 // Keep the add-ons in alphabetic order.
 var addOns =
@@ -63,6 +64,7 @@ var addOns =
         "jython",
         "kotlin",
         "llm",
+        "mcp",
         "network",
         "oast",
         "onlineMenu",
@@ -70,6 +72,7 @@ var addOns =
         "packpentester",
         "packscanrules",
         "paramdigger",
+        "params",
         "plugnhack",
         "postman",
         "pscan",
@@ -100,7 +103,6 @@ var addOns =
         "tips",
         "todo",
         "tokengen",
-        "treetools",
         "viewstate",
         "wappalyzer",
         "webdrivers",
@@ -108,7 +110,6 @@ var addOns =
         "webdrivers:webdrivermacos",
         "webdrivers:webdriverwindows",
         "websocket",
-        "webuipoc",
         "zest",
     )
 

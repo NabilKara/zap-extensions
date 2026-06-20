@@ -5,7 +5,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
+### Changed
+- Update Selenium to version 4.45.0.
 
+## [15.50.0] - 2026-06-12
+### Changed
+- Only collect browser's `console.log` when DEBUG level is set for `org.zaproxy.webdriver`, to avoid unnecessary work for common browser usage.
+
+## [15.49.0] - 2026-05-27
+### Added
+- Programmatic options to force extensions to be included or excluded.
+
+## [15.48.0] - 2026-05-21
+### Changed
+- Update Selenium to version 4.44.0.
+- Formatted JavaScript files for consistency.
+
+## [15.47.0] - 2026-04-14
+### Changed
+- Update Selenium to version 4.43.0.
+
+## [15.46.0] - 2026-03-31
+### Added
+- Allow custom browser builders to define preferences
 
 ## [15.45.0] - 2026-03-04
 ### Fixed
@@ -351,6 +373,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated to Selenium 2.45 and moved to release
 
+[15.50.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.50.0
+[15.49.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.49.0
+[15.48.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.48.0
+[15.47.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.47.0
+[15.46.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.46.0
 [15.45.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.45.0
 [15.44.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.44.0
 [15.43.0]: https://github.com/zaproxy/zap-extensions/releases/selenium-v15.43.0

@@ -25,6 +25,18 @@
 			<td>Automation Framework State</td>
 			<td>afstate</td>
 		</tr>
+		<tr>
+			<td>Script Diagnostics</td>
+			<td>scriptdiagnostics</td>
+		</tr>
+		<tr>
+			<td>Screenshots for Script Diagnostics</td>
+			<td>scriptdiagnosticsscreenshots</td>
+		</tr>
+		<tr>
+			<td>Output for Script Diagnostics</td>
+			<td>scriptdiagnosticsoutput</td>
+		</tr>
 	</table>
 
 	<H3>Sample</H3>
@@ -219,6 +231,93 @@
     ]
 }
 </pre>
+
+	<h4>Script Diagnostics Section</h4>
+	When the
+	<code>scriptdiagnostics</code>
+	section is enabled and the Script Console add-on has recorded runs in
+	the session database, the report can include a
+	<code>scriptDiagnostics</code>
+	object containing a
+	<code>runs</code>
+	array of script diagnostic records. Each run has
+	<code>created</code>
+	,
+	<code>outcome</code>
+	(for example
+	<code>FAILED</code>
+	or
+	<code>SUCCESS</code>
+	),
+	<code>summary</code>
+	, and a
+	<code>scripts</code>
+	array.
+
+	<pre>
+	"scriptDiagnostics": {
+		"runs": [
+			{
+				"created": "2026-05-13T12:19:50.536360Z",
+				"outcome": "FAILED",
+				"summary": "Job: script Chain order: account_check -> nav failed.",
+				"scripts": [
+					{ … }
+				]
+			}
+		]
+	}
+</pre>
+	Each script in a run has an order, name, type, and
+	<code>steps</code>
+	array. Failure steps include the source statement index, line (element
+	type), and
+	<code>outputs</code>
+	(for example error messages).
+	<pre>
+	{
+		"sourceStepIndex": 13,
+		"line": "ZestClientElementClick",
+		"outputs": [
+			{
+				"kind": "ERROR",
+				"message": "…"
+			}
+		]
+	}
+</pre>
+	More data can be included on steps depending on the additional
+	diagnostics sections enabled for the report, as outlined below.
+
+	<H4>Output for Script Diagnostics</H4>
+	Steps can include print output lines with kind
+	<code>OUTPUT</code>
+	. For example:
+
+	<pre>
+	{
+		"sourceStepIndex": 2,
+		"line": "ZestActionPrint",
+		"outputs": [
+			{
+				"kind": "OUTPUT",
+				"message": "In example_script"
+			}
+		]
+	}
+</pre>
+	When this section is disabled, steps still include
+	<code>ERROR</code>
+	output lines; only
+	<code>OUTPUT</code>
+	lines are omitted.
+
+	<H4>Screenshots for Script Diagnostics</H4>
+	When this section is enabled the step can, optionally, include a
+	screenshot of the browser with the image data Base64 encoded.
+	<pre>
+	"screenshot": "…"
+</pre>
+
 </BODY>
 </HTML>
-

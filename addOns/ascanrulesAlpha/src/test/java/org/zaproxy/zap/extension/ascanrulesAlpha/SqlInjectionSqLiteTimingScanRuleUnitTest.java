@@ -22,11 +22,13 @@ package org.zaproxy.zap.extension.ascanrulesAlpha;
 import static fi.iki.elonen.NanoHTTPD.newFixedLengthResponse;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.startsWith;
 
 import fi.iki.elonen.NanoHTTPD.IHTTPSession;
 import fi.iki.elonen.NanoHTTPD.Response;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.parosproxy.paros.core.scanner.Alert;
@@ -195,7 +197,14 @@ class SqlInjectionSqLiteTimingScanRuleUnitTest
         // Then
         assertThat(cwe, is(equalTo(89)));
         assertThat(wasc, is(equalTo(19)));
-        assertThat(tags.size(), is(equalTo(8)));
+        assertThat(tags.size(), is(equalTo(10)));
+        assertThat(
+                tags.containsKey(
+                        CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION.getTag()),
+                is(equalTo(true)));
+        assertThat(
+                tags.containsKey(CommonAlertTag.OWASP_2025_A05_INJECTION.getTag()),
+                is(equalTo(true)));
         assertThat(
                 tags.containsKey(CommonAlertTag.OWASP_2021_A03_INJECTION.getTag()),
                 is(equalTo(true)));
@@ -210,6 +219,15 @@ class SqlInjectionSqLiteTimingScanRuleUnitTest
         assertThat(tags.containsKey(PolicyTag.QA_FULL.getTag()), is(equalTo(true)));
         assertThat(tags.containsKey(PolicyTag.PENTEST.getTag()), is(equalTo(true)));
         assertThat(
+                tags.get(CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION.getTag()),
+                is(
+                        equalTo(
+                                CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION
+                                        .getValue())));
+        assertThat(
+                tags.get(CommonAlertTag.OWASP_2025_A05_INJECTION.getTag()),
+                is(equalTo(CommonAlertTag.OWASP_2025_A05_INJECTION.getValue())));
+        assertThat(
                 tags.get(CommonAlertTag.OWASP_2021_A03_INJECTION.getTag()),
                 is(equalTo(CommonAlertTag.OWASP_2021_A03_INJECTION.getValue())));
         assertThat(
@@ -218,5 +236,23 @@ class SqlInjectionSqLiteTimingScanRuleUnitTest
         assertThat(
                 tags.get(CommonAlertTag.WSTG_V42_INPV_05_SQLI.getTag()),
                 is(equalTo(CommonAlertTag.WSTG_V42_INPV_05_SQLI.getValue())));
+    }
+
+    @Test
+    void shouldHaveExpectedExampleAlerts() {
+        // Given / When
+        List<Alert> alerts = rule.getExampleAlerts();
+        // Then
+        assertThat(alerts, hasSize(2));
+
+        Alert errorAlert = alerts.get(0);
+        assertThat(errorAlert.getRisk(), is(equalTo(Alert.RISK_HIGH)));
+        assertThat(errorAlert.getConfidence(), is(equalTo(Alert.CONFIDENCE_MEDIUM)));
+        assertThat(errorAlert.getAlertRef(), is(equalTo(rule.getId() + "-1")));
+
+        Alert timingAlert = alerts.get(1);
+        assertThat(timingAlert.getRisk(), is(equalTo(Alert.RISK_HIGH)));
+        assertThat(timingAlert.getConfidence(), is(equalTo(Alert.CONFIDENCE_MEDIUM)));
+        assertThat(timingAlert.getAlertRef(), is(equalTo(rule.getId() + "-2")));
     }
 }

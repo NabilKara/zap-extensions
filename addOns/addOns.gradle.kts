@@ -1,5 +1,6 @@
 import me.champeau.gradle.japicmp.JapicmpTask
 import org.cyclonedx.gradle.CycloneDxTask
+import org.gradle.api.internal.provider.TransformBackedProvider
 import org.zaproxy.gradle.addon.AddOnPlugin
 import org.zaproxy.gradle.addon.AddOnPluginExtension
 import org.zaproxy.gradle.addon.apigen.ApiClientGenExtension
@@ -19,7 +20,6 @@ plugins {
     eclipse
     jacoco
     alias(libs.plugins.cyclonedx) apply false
-    alias(libs.plugins.datanucleus) apply false
     alias(libs.plugins.zaproxy.addon) apply false
     alias(libs.plugins.zaproxy.crowdin) apply false
     alias(libs.plugins.japicmp) apply false
@@ -95,7 +95,6 @@ subprojects {
     apply(plugin = "java-library")
     apply(plugin = "jacoco")
     apply(plugin = "org.cyclonedx.bom")
-    apply(plugin = "org.rm3l.datanucleus-gradle-plugin")
     apply(plugin = "org.zaproxy.add-on")
     apply(plugin = "org.zaproxy.common")
     if (useCrowdin) {
@@ -124,6 +123,33 @@ subprojects {
     }
 
     group = "org.zaproxy.addon"
+
+    spotless {
+        format("js") {
+            target(
+                project.fileTree(project.projectDir) {
+                    include("src/**/*.js", "src/**/*.mjs", "src/**/*.cjs")
+                },
+            )
+            targetExclude("**/*.min.js")
+
+            val npmDir =
+                (project.rootProject.tasks.named("npmSetup").get().property("npmDir") as TransformBackedProvider<*, *>)
+                    .get()
+                    .toString()
+            val npmExecutable =
+                if (System.getProperty("os.name").lowercase().contains("windows")) {
+                    "/npm.cmd"
+                } else {
+                    "/bin/npm"
+                }
+            prettier(rootProject.libs.versions.prettier.get()).npmExecutable(npmDir + npmExecutable)
+        }
+
+        tasks.named("spotlessJs").configure {
+            dependsOn(rootProject.tasks.named("nodeSetup"), rootProject.tasks.named("npmSetup"))
+        }
+    }
 
     java {
         // Compile with appropriate Java version when building ZAP releases.
@@ -178,6 +204,8 @@ subprojects {
     val zapGav = "org.zaproxy:zap:2.17.0"
     dependencies {
         "zap"(zapGav)
+
+        "testImplementation"(project(":testutilscore"))
     }
 
     val apiGenClasspath = configurations.detachedConfiguration(dependencies.create(zapGav))
