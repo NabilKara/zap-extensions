@@ -15,6 +15,9 @@ zapAddOn {
                 register("client") {
                     version.set(">=0.7.0")
                 }
+                register("network") {
+                    version.set(">=0.2.0")
+                }
                 register("selenium") {
                     version.set(">=15.0.0")
                 }
@@ -44,6 +47,7 @@ tasks.named("compileJava") {
 dependencies {
     zapAddOn("commonlib")
     zapAddOn("client")
+    zapAddOn("network")
     zapAddOn("selenium")
     compileOnly(parent!!.project("client"))
     compileOnly(parent!!.project("selenium"))

@@ -37,13 +37,14 @@ import org.parosproxy.paros.control.Control;
 import org.parosproxy.paros.core.scanner.AbstractAppPlugin;
 import org.parosproxy.paros.core.scanner.Alert;
 import org.parosproxy.paros.core.scanner.Category;
-import org.parosproxy.paros.model.Model;
 import org.parosproxy.paros.network.HttpMessage;
 import org.parosproxy.paros.network.HttpSender;
 import org.zaproxy.addon.client.ExtensionClientIntegration;
 import org.zaproxy.addon.client.internal.ClientNode;
 import org.zaproxy.addon.client.internal.ClientSideComponent;
 import org.zaproxy.addon.client.internal.ClientSideDetails;
+import org.zaproxy.addon.network.ExtensionNetwork;
+import org.zaproxy.addon.network.server.ServerInfo;
 import org.zaproxy.zap.extension.ascanrulesAlpha.scripts.ClientSideEngineDetector;
 import org.zaproxy.zap.extension.selenium.Browser;
 import org.zaproxy.zap.extension.selenium.ExtensionSelenium;
@@ -509,12 +510,21 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                 return;
             }
 
-            int proxyPort = Model.getSingleton().getOptionsParam().getProxyParam().getProxyPort();
+            ExtensionNetwork extNetwork =
+                    Control.getSingleton().getExtensionLoader().getExtension(ExtensionNetwork.class);
+            if (extNetwork == null) {
+                LOGGER.warn("CSTI: Network add-on not available – browser proxying disabled.");
+                return;
+            }
+
+            ServerInfo proxyServerInfo = extNetwork.getMainProxyServerInfo();
+            String proxyAddress = proxyServerInfo.getAddress();
+            int proxyPort = proxyServerInfo.getPort();
             try {
                 WebDriver driver = ExtensionSelenium.getWebDriver(
                         HttpSender.ACTIVE_SCANNER_INITIATOR,
                         preferredBrowser,
-                        "127.0.0.1",
+                        proxyAddress,
                         proxyPort,
                         capabilities -> capabilities.setCapability(
                                 org.openqa.selenium.remote.CapabilityType.UNHANDLED_PROMPT_BEHAVIOUR,
@@ -527,7 +537,7 @@ public class CstiActiveScanRule extends AbstractAppPlugin {
                         java.time.Duration.of(10, java.time.temporal.ChronoUnit.SECONDS));
 
                 sharedDriver.set(driver);
-                LOGGER.info("CSTI: WebDriver started with {} (proxy port {}).", preferredBrowser, proxyPort);
+                LOGGER.info("CSTI: WebDriver started with {} (proxy {}:{}).", preferredBrowser, proxyAddress, proxyPort);
             } catch (Exception e) {
                 LOGGER.warn("CSTI: failed to start {} WebDriver: {}", preferredBrowser, e.getMessage());
             }
