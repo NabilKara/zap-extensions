@@ -21,8 +21,11 @@ package org.zaproxy.zap.extension.ascanrulesAlpha;
 
 import static fi.iki.elonen.NanoHTTPD.newFixedLengthResponse;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.emptyString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 
@@ -30,12 +33,14 @@ import fi.iki.elonen.NanoHTTPD;
 import fi.iki.elonen.NanoHTTPD.IHTTPSession;
 import fi.iki.elonen.NanoHTTPD.Response;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import org.apache.commons.httpclient.URI;
 import org.apache.commons.httpclient.URIException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.parosproxy.paros.core.scanner.Alert;
 import org.parosproxy.paros.core.scanner.ScannerParam;
 import org.parosproxy.paros.network.HttpMalformedHeaderException;
 import org.parosproxy.paros.network.HttpMessage;
@@ -64,7 +69,14 @@ class LdapInjectionScanRuleUnitTest extends ActiveScannerTest<LdapInjectionScanR
         // Then
         assertThat(cwe, is(equalTo(90)));
         assertThat(wasc, is(equalTo(29)));
-        assertThat(tags.size(), is(equalTo(6)));
+        assertThat(tags.size(), is(equalTo(8)));
+        assertThat(
+                tags.containsKey(
+                        CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION.getTag()),
+                is(equalTo(true)));
+        assertThat(
+                tags.containsKey(CommonAlertTag.OWASP_2025_A05_INJECTION.getTag()),
+                is(equalTo(true)));
         assertThat(
                 tags.containsKey(CommonAlertTag.OWASP_2021_A03_INJECTION.getTag()),
                 is(equalTo(true)));
@@ -74,6 +86,15 @@ class LdapInjectionScanRuleUnitTest extends ActiveScannerTest<LdapInjectionScanR
         assertThat(
                 tags.containsKey(CommonAlertTag.WSTG_V42_INPV_06_LDAPI.getTag()),
                 is(equalTo(true)));
+        assertThat(
+                tags.get(CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION.getTag()),
+                is(
+                        equalTo(
+                                CommonAlertTag.API_2023_API4_UNRESTRICTED_RESOURCE_CONSUMPTION
+                                        .getValue())));
+        assertThat(
+                tags.get(CommonAlertTag.OWASP_2025_A05_INJECTION.getTag()),
+                is(equalTo(CommonAlertTag.OWASP_2025_A05_INJECTION.getValue())));
         assertThat(tags.containsKey(CommonAlertTag.HIPAA.getTag()), is(equalTo(true)));
         assertThat(tags.containsKey(CommonAlertTag.PCI_DSS.getTag()), is(equalTo(true)));
         assertThat(tags.containsKey(PolicyTag.PENTEST.getTag()), is(equalTo(true)));
@@ -153,6 +174,24 @@ class LdapInjectionScanRuleUnitTest extends ActiveScannerTest<LdapInjectionScanR
         // Then
         assertThat(alertsRaised, is(empty()));
         assertThat(httpMessagesSent, is(not(empty())));
+    }
+
+    @Test
+    void shouldHaveExpectedExampleAlerts() {
+        // Given / When
+        List<Alert> alerts = rule.getExampleAlerts();
+        // Then
+        assertThat(alerts, hasSize(2));
+
+        Alert errorBasedAlert = alerts.get(0);
+        assertThat(errorBasedAlert.getRisk(), is(equalTo(Alert.RISK_HIGH)));
+        assertThat(errorBasedAlert.getConfidence(), is(equalTo(Alert.CONFIDENCE_MEDIUM)));
+        assertThat(errorBasedAlert.getOtherInfo(), containsString("0x00005011L"));
+
+        Alert booleanBasedAlert = alerts.get(1);
+        assertThat(booleanBasedAlert.getRisk(), is(equalTo(Alert.RISK_HIGH)));
+        assertThat(booleanBasedAlert.getConfidence(), is(equalTo(Alert.CONFIDENCE_MEDIUM)));
+        assertThat(booleanBasedAlert.getOtherInfo(), is(not(emptyString())));
     }
 
     private static HttpMessage createMessage(String path) {

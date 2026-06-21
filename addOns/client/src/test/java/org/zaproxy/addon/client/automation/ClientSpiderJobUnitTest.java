@@ -51,9 +51,10 @@ import org.zaproxy.addon.automation.AutomationEnvironment;
 import org.zaproxy.addon.automation.AutomationJob.Order;
 import org.zaproxy.addon.automation.AutomationProgress;
 import org.zaproxy.addon.automation.ContextWrapper;
-import org.zaproxy.addon.client.ClientOptions;
 import org.zaproxy.addon.client.ExtensionClientIntegration;
 import org.zaproxy.addon.client.spider.ClientSpider;
+import org.zaproxy.addon.client.spider.ClientSpiderOptions;
+import org.zaproxy.addon.client.spider.ClientSpiderOptions.ScopeCheck;
 import org.zaproxy.addon.commonlib.Constants;
 import org.zaproxy.zap.model.Context;
 import org.zaproxy.zap.testutils.TestUtils;
@@ -146,7 +147,8 @@ public class ClientSpiderJobUnitTest extends TestUtils {
         assertThat(job.getParameters().getUser(), is(equalTo("")));
         assertThat(job.getParameters().getUrl(), is(equalTo("")));
         assertThat(job.getParameters().getMaxDuration(), is(nullValue()));
-        assertThat(job.getParameters().getMaxCrawlDepth(), is(ClientOptions.DEFAULT_MAX_DEPTH));
+        assertThat(
+                job.getParameters().getMaxCrawlDepth(), is(ClientSpiderOptions.DEFAULT_MAX_DEPTH));
         assertThat(job.getParameters().getMaxChildren(), is(nullValue()));
         assertThat(
                 job.getParameters().getNumberOfBrowsers(),
@@ -154,9 +156,17 @@ public class ClientSpiderJobUnitTest extends TestUtils {
         assertThat(job.getParameters().getBrowserId(), is(nullValue()));
         assertThat(
                 job.getParameters().getInitialLoadTime(),
-                is(ClientOptions.DEFAULT_INITIAL_LOAD_TIME));
-        assertThat(job.getParameters().getPageLoadTime(), is(ClientOptions.DEFAULT_PAGE_LOAD_TIME));
-        assertThat(job.getParameters().getShutdownTime(), is(ClientOptions.DEFAULT_SHUTDOWN_TIME));
+                is(ClientSpiderOptions.DEFAULT_INITIAL_LOAD_TIME));
+        assertThat(
+                job.getParameters().getPageLoadTime(),
+                is(ClientSpiderOptions.DEFAULT_PAGE_LOAD_TIME));
+        assertThat(
+                job.getParameters().getShutdownTime(),
+                is(ClientSpiderOptions.DEFAULT_SHUTDOWN_TIME));
+        assertThat(job.getParameters().getLogoutAvoidance(), is(true));
+        assertThat(
+                job.getParameters().getActionWaitTime(),
+                is(ClientSpiderOptions.DEFAULT_ACTION_WAIT_TIME));
     }
 
     @Test
@@ -178,6 +188,8 @@ public class ClientSpiderJobUnitTest extends TestUtils {
                   initialLoadTime:  12
                   pageLoadTime:     13
                   shutdownTime:     14
+                  logoutAvoidance: false
+                  actionWaitTime:  3
                 """;
         Yaml yaml = new Yaml();
         Object data = yaml.load(yamlStr);
@@ -200,6 +212,50 @@ public class ClientSpiderJobUnitTest extends TestUtils {
         assertThat(job.getParameters().getInitialLoadTime(), is(equalTo(12)));
         assertThat(job.getParameters().getPageLoadTime(), is(equalTo(13)));
         assertThat(job.getParameters().getShutdownTime(), is(equalTo(14)));
+        assertThat(job.getParameters().getLogoutAvoidance(), is(equalTo(false)));
+        assertThat(job.getParameters().getActionWaitTime(), is(equalTo(3)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 5})
+    void shouldApplyActionWaitTimeToOptions(int value) {
+        // Given
+        ClientSpiderJob job = new ClientSpiderJob();
+        job.getParameters().setActionWaitTime(value);
+
+        // When
+        ClientSpiderOptions options = job.paramsToOptions();
+
+        // Then
+        assertThat(options.getActionWaitTimeInSecs(), is(value));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"FLEXIBLE", "STRICT"})
+    void shouldApplyScopeCheckToOptions(String value) {
+        // Given
+        ClientSpiderJob job = new ClientSpiderJob();
+        job.getParameters().setScopeCheck(value);
+
+        // When
+        ClientSpiderOptions options = job.paramsToOptions();
+
+        // Then
+        assertThat(options.getScopeCheck(), is(ScopeCheck.valueOf(value)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void shouldApplyLogoutAvoidanceToOptions(boolean value) {
+        // Given
+        ClientSpiderJob job = new ClientSpiderJob();
+        job.getParameters().setLogoutAvoidance(value);
+
+        // When
+        ClientSpiderOptions options = job.paramsToOptions();
+
+        // Then
+        assertThat(options.isLogoutAvoidance(), is(value));
     }
 
     @Test

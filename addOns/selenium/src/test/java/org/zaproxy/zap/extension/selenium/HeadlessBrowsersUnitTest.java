@@ -32,12 +32,10 @@ import fi.iki.elonen.NanoHTTPD;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -47,6 +45,7 @@ import org.mockito.quality.Strictness;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.remote.RemoteWebDriver;
+import org.parosproxy.paros.Constant;
 import org.parosproxy.paros.control.Control;
 import org.parosproxy.paros.extension.ExtensionHook;
 import org.parosproxy.paros.extension.ExtensionLoader;
@@ -84,19 +83,16 @@ class HeadlessBrowsersUnitTest extends TestUtils {
 
     private WebDriver driver;
 
-    @BeforeAll
-    static void setupAll() {
+    @BeforeEach
+    void setUp() throws Exception {
         if (CHROME_WEB_DRIVER == null) {
             // Assume we are running locally
             String webdriversHome = System.getProperty("zap.test.webdrivers.home");
             if (webdriversHome != null && !webdriversHome.isEmpty()) {
-                Browser.setZapHomeDir(Paths.get(webdriversHome));
+                Constant.setZapHome(webdriversHome);
             }
         }
-    }
 
-    @BeforeEach
-    void setUp() throws Exception {
         extensionSelenium = new ExtensionSelenium();
         mockMessages(extensionSelenium);
         setUpZap();
@@ -133,8 +129,10 @@ class HeadlessBrowsersUnitTest extends TestUtils {
         session = new Session(model);
         given(model.getSession()).willReturn(session);
 
-        extensionSelenium.addCustomBrowser(new CustomBrowser("fx", null, null, null, "Firefox"));
-        extensionSelenium.addCustomBrowser(new CustomBrowser("cr", null, null, null, "Chromium"));
+        extensionSelenium.addCustomBrowser(
+                CustomBrowser.builder().name("fx").browserType("Firefox").build());
+        extensionSelenium.addCustomBrowser(
+                CustomBrowser.builder().name("cr").browserType("Chromium").build());
 
         startServer();
         byte[] imageBytes =
@@ -182,7 +180,7 @@ class HeadlessBrowsersUnitTest extends TestUtils {
     @AfterEach
     void tearDown() throws Exception {
         stopServer();
-        Browser.setZapHomeDir(null);
+        Browser.clearZapHomeDir();
         extensionNetwork.stop();
         extensionSelenium.destroy();
         if (driver != null) {

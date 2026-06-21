@@ -23,8 +23,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.parosproxy.paros.core.scanner.Alert;
 import org.zaproxy.addon.commonlib.CommonAlertTag;
 import org.zaproxy.addon.commonlib.PolicyTag;
 
@@ -45,7 +47,7 @@ class PersistentXssScanRuleUnitTest extends ActiveScannerTest<PersistentXssScanR
         // Then
         assertThat(cwe, is(equalTo(79)));
         assertThat(wasc, is(equalTo(8)));
-        assertThat(tags.size(), is(equalTo(9)));
+        assertThat(tags.size(), is(equalTo(10)));
         assertThat(
                 tags.containsKey(CommonAlertTag.OWASP_2021_A03_INJECTION.getTag()),
                 is(equalTo(true)));
@@ -68,5 +70,13 @@ class PersistentXssScanRuleUnitTest extends ActiveScannerTest<PersistentXssScanR
         assertThat(
                 tags.get(CommonAlertTag.WSTG_V42_INPV_02_STORED_XSS.getTag()),
                 is(equalTo(CommonAlertTag.WSTG_V42_INPV_02_STORED_XSS.getValue())));
+    }
+
+    @Test
+    void shouldHaveExpectedExampleAlerts() {
+        // Given / When
+        List<Alert> alerts = rule.getExampleAlerts();
+        // Then
+        assertThat(alerts.size(), is(equalTo(3)));
     }
 }

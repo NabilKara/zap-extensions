@@ -24,7 +24,7 @@ zapAddOn {
                     version.set(">= 15.39.0")
                 }
                 register("commonlib") {
-                    version.set(">= 1.29.0 & < 2.0.0")
+                    version.set(">= 1.40.0 & < 2.0.0")
                 }
             }
         }
@@ -38,14 +38,4 @@ dependencies {
 
     testImplementation(libs.test.webdrivermanager)
     testImplementation(project(":testutils"))
-}
-
-tasks.withType<Test>().configureEach {
-    systemProperties.putAll(
-        mapOf(
-            "wdm.chromeDriverVersion" to "108.0.5359.71",
-            "wdm.geckoDriverVersion" to "0.32.0",
-            "wdm.forceCache" to "true",
-        ),
-    )
 }

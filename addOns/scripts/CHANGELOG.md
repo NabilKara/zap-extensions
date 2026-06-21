@@ -4,6 +4,17 @@ All notable changes to this add-on will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
+### Added
+- Functionality to store script diagnostics and provides them to Reports. Depends on the database add-on.
+
+### Changed
+- Update dependency.
+- Revised error handling for chained scripts, output is now more detailed/specific.
+- The Run Script action display for chains in the Automation panel has been updated to display the names of scripts in the chain instead of being blank.
+- Maintenance changes.
+- Formatted JavaScript files for consistency.
+
+## [45.18.0] - 2026-03-31
 ### Changed
 - Update dependency.
 
@@ -428,6 +439,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+[45.18.0]: https://github.com/zaproxy/zap-extensions/releases/scripts-v45.18.0
 [45.17.0]: https://github.com/zaproxy/zap-extensions/releases/scripts-v45.17.0
 [45.16.0]: https://github.com/zaproxy/zap-extensions/releases/scripts-v45.16.0
 [45.15.0]: https://github.com/zaproxy/zap-extensions/releases/scripts-v45.15.0

@@ -11,6 +11,7 @@ rootProject.name = "zap-extensions"
 val addOnsProjectName = "addOns"
 include(addOnsProjectName)
 include("testutils")
+include("testutilscore")
 
 // Keep the add-ons in alphabetic order.
 val addOns =
@@ -64,6 +65,7 @@ val addOns =
         "jython",
         "kotlin",
         "llm",
+        "mcp",
         "network",
         "oast",
         "onlineMenu",
@@ -71,6 +73,7 @@ val addOns =
         "packpentester",
         "packscanrules",
         "paramdigger",
+        "params",
         "plugnhack",
         "postman",
         "pscan",
@@ -101,7 +104,6 @@ val addOns =
         "tips",
         "todo",
         "tokengen",
-        "treetools",
         "viewstate",
         "wappalyzer",
         "webdrivers",
@@ -109,13 +111,8 @@ val addOns =
         "webdrivers:webdrivermacos",
         "webdrivers:webdriverwindows",
         "websocket",
-        "webuipoc",
         "zest",
     )
-
-if (JavaVersion.current() < JavaVersion.VERSION_21) {
-    addOns.remove("httpsInfo")
-}
 
 addOns.forEach { include("$addOnsProjectName:$it") }
 
